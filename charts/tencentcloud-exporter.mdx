@@ -1,0 +1,277 @@
+---
+title: Tencent Cloud Exporter
+description: Export Tencent Cloud monitoring metrics to Prometheus
+---
+
+The Tencent Cloud Exporter chart deploys a Prometheus exporter for Tencent Cloud services, enabling monitoring of your cloud infrastructure through Prometheus.
+
+## What It Monitors
+
+This exporter collects metrics from Tencent Cloud services including:
+
+- Cloud Database (CDB) - MySQL, PostgreSQL, Redis
+- Cloud Virtual Machine (CVM)
+- Cloud Load Balancer (CLB)
+- Cloud Object Storage (COS)
+- TencentDB for various database engines
+- And many other Tencent Cloud products
+
+## Installation
+
+### Prerequisites
+
+You need Tencent Cloud API credentials (SecretId and SecretKey) with monitoring permissions.
+
+### Basic Installation
+
+```bash
+helm repo add douban https://douban.github.io/charts
+helm install tc-exporter douban/tencentcloud-exporter
+```
+
+## Authentication Configuration
+
+<Warning>
+  Never commit Tencent Cloud credentials to version control. Always use Kubernetes secrets or external secret management.
+</Warning>
+
+### Using Environment Variables
+
+Configure credentials securely:
+
+```yaml
+extraEnvs:
+  - name: TENCENTCLOUD_SECRET_ID
+    valueFrom:
+      secretKeyRef:
+        name: tencentcloud-credentials
+        key: secret-id
+  - name: TENCENTCLOUD_SECRET_KEY
+    valueFrom:
+      secretKeyRef:
+        name: tencentcloud-credentials
+        key: secret-key
+  - name: TENCENTCLOUD_REGION
+    value: "ap-guangzhou"
+```
+
+<ParamField path="extraEnvs" type="array" default="[]">
+  Environment variables for credentials and configuration
+</ParamField>
+
+### Create Credentials Secret
+
+```bash
+kubectl create secret generic tencentcloud-credentials \
+  --from-literal=secret-id="YOUR_SECRET_ID" \
+  --from-literal=secret-key="YOUR_SECRET_KEY"
+```
+
+## Product Configuration
+
+Configure which Tencent Cloud products to monitor:
+
+<ParamField path="extraConfigs.products" type="array" required>
+  List of Tencent Cloud products to monitor with their configuration
+</ParamField>
+
+### Example Product Configuration
+
+```yaml
+extraConfigs:
+  products:
+    # Monitor all Cloud Database instances
+    - namespace: QCE/CDB
+      all_metrics: true
+      all_instances: true
+      extra_labels: [InstanceName, Zone]
+    
+    # Monitor Redis instances
+    - namespace: QCE/REDIS
+      all_metrics: true
+      all_instances: true
+      extra_labels: [InstanceName, Zone]
+    
+    # Monitor CVM (compute) instances
+    - namespace: QCE/CVM
+      all_metrics: false
+      metrics:
+        - CPUUsage
+        - MemUsage
+        - DiskUsage
+      instances:
+        - ins-12345678
+        - ins-87654321
+```
+
+### Common Namespaces
+
+- `QCE/CDB` - Cloud Database MySQL
+- `QCE/REDIS` - TencentDB for Redis
+- `QCE/CVM` - Cloud Virtual Machine
+- `QCE/CLB` - Cloud Load Balancer
+- `QCE/COS` - Cloud Object Storage
+- `QCE/POSTGRES` - TencentDB for PostgreSQL
+
+## Configuration
+
+<ParamField path="image.repository" type="string" default="ghcr.io/leoquote/tencentcloud-exporter">
+  Container image repository
+</ParamField>
+
+<ParamField path="image.tag" type="string" default="master">
+  Container image tag
+</ParamField>
+
+<ParamField path="containerPort" type="number" default="9123">
+  Port the exporter listens on
+</ParamField>
+
+<ParamField path="service.port" type="number" default="9123">
+  Service port to expose metrics
+</ParamField>
+
+## ServiceMonitor Configuration
+
+For automatic Prometheus scraping via the Prometheus Operator:
+
+```yaml
+serviceMonitor:
+  enabled: true
+  interval: 60s
+  labels:
+    prometheus: kube-prometheus
+```
+
+<ParamField path="serviceMonitor.enabled" type="boolean" default="false">
+  Enable ServiceMonitor resource creation
+</ParamField>
+
+<ParamField path="serviceMonitor.interval" type="string" default="30s">
+  Scrape interval (60s recommended for cloud APIs)
+</ParamField>
+
+## ScrapeConfig (Recommended)
+
+<Warning>
+  For Tencent Cloud, it's recommended to use ScrapeConfig instead of ServiceMonitor for better flexibility.
+</Warning>
+
+```yaml
+scrapeConfig:
+  enabled: true
+  interval: 1m
+  timeout: 10s
+  relabelings:
+    - regex: 'container|endpoint|pod|service|instance'
+      action: "labeldrop"
+  metricRelabelings:
+    - regex: 'instance'
+      action: "labeldrop"
+```
+
+<ParamField path="scrapeConfig.enabled" type="boolean" default="false">
+  Enable ScrapeConfig resource (more flexible than ServiceMonitor)
+</ParamField>
+
+<ParamField path="scrapeConfig.interval" type="string" default="1m">
+  How frequently to scrape
+</ParamField>
+
+<ParamField path="scrapeConfig.timeout" type="string" default="10s">
+  Scrape timeout
+</ParamField>
+
+## Manual Prometheus Configuration
+
+If not using Prometheus Operator:
+
+```yaml
+scrape_configs:
+  - job_name: 'tencentcloud-exporter'
+    static_configs:
+      - targets: ['tencentcloud-exporter:9123']
+    scrape_interval: 60s
+    scrape_timeout: 30s
+```
+
+## Example Values
+
+```yaml
+replicaCount: 1
+
+image:
+  repository: ghcr.io/leoquote/tencentcloud-exporter
+  tag: "master"
+  pullPolicy: IfNotPresent
+
+extraEnvs:
+  - name: TENCENTCLOUD_SECRET_ID
+    valueFrom:
+      secretKeyRef:
+        name: tencentcloud-credentials
+        key: secret-id
+  - name: TENCENTCLOUD_SECRET_KEY
+    valueFrom:
+      secretKeyRef:
+        name: tencentcloud-credentials
+        key: secret-key
+  - name: TENCENTCLOUD_REGION
+    value: "ap-guangzhou"
+
+extraConfigs:
+  products:
+    - namespace: QCE/CDB
+      all_metrics: true
+      all_instances: true
+      extra_labels: [InstanceName, Zone]
+    - namespace: QCE/REDIS
+      all_metrics: true
+      all_instances: true
+      extra_labels: [InstanceName, Zone]
+
+scrapeConfig:
+  enabled: true
+  interval: 1m
+  timeout: 10s
+  relabelings:
+    - regex: 'container|endpoint|pod|service|instance'
+      action: "labeldrop"
+
+resources:
+  limits:
+    cpu: 500m
+    memory: 512Mi
+  requests:
+    cpu: 200m
+    memory: 256Mi
+```
+
+## Metrics Exposed
+
+Metrics are available at the `/metrics` endpoint. Examples include:
+
+- `tencentcloud_cdb_cpu_usage` - Database CPU usage
+- `tencentcloud_cdb_memory_usage` - Database memory usage
+- `tencentcloud_redis_connections` - Redis connections
+- `tencentcloud_cvm_cpu_usage` - VM CPU usage
+- `tencentcloud_clb_connections` - Load balancer connections
+
+Metric names follow the pattern: `tencentcloud_{product}_{metric_name}`
+
+## Security Best Practices
+
+<Warning>
+  Follow these security guidelines:
+</Warning>
+
+1. **Use CAM roles** - Create a dedicated CAM user with read-only monitoring permissions
+2. **Rotate credentials** - Change API keys regularly
+3. **Use Kubernetes secrets** - Never hardcode credentials
+4. **Limit permissions** - Only grant access to required cloud products
+5. **Network policies** - Restrict network access to the exporter
+
+## Resources
+
+- [Tencent Cloud Exporter GitHub](https://github.com/douban/tencentcloud-exporter)
+- [Tencent Cloud Monitoring Documentation](https://www.tencentcloud.com/document/product/248)

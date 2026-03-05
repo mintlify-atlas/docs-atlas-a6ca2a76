@@ -1,0 +1,375 @@
+---
+title: Dify
+description: Deploy Dify AI application platform on Kubernetes
+---
+
+The Dify chart deploys Dify, an open-source LLM app development platform that combines AI workflow, RAG pipeline, agent capabilities, model management, and observability features. It enables developers to quickly build and operate generative AI applications.
+
+## What It Deploys
+
+This chart deploys:
+- Dify API backend (version 1.13.0)
+- Dify web frontend
+- Celery worker for background tasks
+- Celery beat scheduler for periodic tasks
+- Sandbox environment for code execution
+- Plugin daemon for plugin management
+- Optional embedded Redis, PostgreSQL, and MinIO
+
+## Installation
+
+```bash
+helm repo add douban https://douban.github.io/charts/
+helm install dify douban/dify -f values.yaml
+```
+
+**Important:** After installation, you must run database migrations:
+
+```bash
+kubectl exec -it <dify-api-pod-name> -- flask db upgrade
+```
+
+## Key Configuration Parameters
+
+<ParamField path="global.host" type="string" default="chart-example.local">
+  Hostname for accessing Dify
+</ParamField>
+
+<ParamField path="global.enableTLS" type="boolean" default="false">
+  Enable TLS/HTTPS for Dify URLs
+</ParamField>
+
+<ParamField path="global.baseUrlOverride" type="string" default="">
+  Override the base URL for all Dify services (useful for external TLS termination)
+</ParamField>
+
+<ParamField path="global.image.tag" type="string" default="1.10.1-fix.1">
+  Dify image tag to deploy
+</ParamField>
+
+<ParamField path="global.edition" type="string" default="SELF_HOSTED">
+  Dify edition (SELF_HOSTED or CLOUD)
+</ParamField>
+
+<ParamField path="global.storageType" type="string" default="s3">
+  Storage backend type (s3, google-storage, azure-blob, etc.)
+</ParamField>
+
+<ParamField path="global.extraBackendEnvs" type="array" required>
+  Environment variables for backend services. **SECRET_KEY is required!**
+</ParamField>
+
+<ParamField path="redis.embedded" type="boolean" default="true">
+  Use embedded Redis (disable for production, use external Redis)
+</ParamField>
+
+<ParamField path="postgresql.embedded" type="boolean" default="true">
+  Use embedded PostgreSQL (disable for production, use external database)
+</ParamField>
+
+<ParamField path="minio.embedded" type="boolean" default="false">
+  Use embedded MinIO for S3-compatible storage
+</ParamField>
+
+<ParamField path="sandbox.apiKey" type="string" default="dify-sandbox">
+  API key for sandbox service (change this in production)
+</ParamField>
+
+<ParamField path="pluginDaemon.enabled" type="boolean" default="true">
+  Enable plugin daemon for plugin management
+</ParamField>
+
+## Example Configurations
+
+### Minimal Development Setup
+
+```yaml
+global:
+  host: "mydify.example.com"
+  enableTLS: false
+  image:
+    tag: "1.10.1-fix.1"
+  extraBackendEnvs:
+    - name: SECRET_KEY
+      value: "your-secret-key-here-change-this"
+    - name: LOG_LEVEL
+      value: "DEBUG"
+
+ingress:
+  enabled: true
+  className: "nginx"
+
+minio:
+  embedded: true
+```
+
+### Production Setup with External Services
+
+```yaml
+global:
+  host: "dify.example.com"
+  enableTLS: true
+  image:
+    tag: "1.13.0"
+  extraBackendEnvs:
+    # Use secrets for sensitive data
+    - name: SECRET_KEY
+      valueFrom:
+        secretKeyRef:
+          name: dify-secrets
+          key: SECRET_KEY
+    # External PostgreSQL
+    - name: DB_USERNAME
+      value: "dify"
+    - name: DB_PASSWORD
+      valueFrom:
+        secretKeyRef:
+          name: dify-secrets
+          key: DB_PASSWORD
+    - name: DB_HOST
+      value: "postgres.example.com"
+    - name: DB_PORT
+      value: "5432"
+    - name: DB_DATABASE
+      value: "dify"
+    # External Redis
+    - name: REDIS_HOST
+      value: "redis.example.com"
+    - name: REDIS_PORT
+      value: "6379"
+    - name: REDIS_DB
+      value: "0"
+    - name: REDIS_PASSWORD
+      valueFrom:
+        secretKeyRef:
+          name: dify-secrets
+          key: REDIS_PASSWORD
+    - name: CELERY_BROKER_URL
+      valueFrom:
+        secretKeyRef:
+          name: dify-secrets
+          key: CELERY_BROKER_URL
+    # S3 Storage
+    - name: S3_ENDPOINT
+      value: "https://s3.amazonaws.com"
+    - name: S3_BUCKET_NAME
+      value: "my-dify-bucket"
+    - name: S3_ACCESS_KEY
+      valueFrom:
+        secretKeyRef:
+          name: dify-secrets
+          key: S3_ACCESS_KEY
+    - name: S3_SECRET_KEY
+      valueFrom:
+        secretKeyRef:
+          name: dify-secrets
+          key: S3_SECRET_KEY
+
+ingress:
+  enabled: true
+  className: "nginx"
+  tlsSecretName: "dify-tls"
+
+# Disable embedded services
+redis:
+  embedded: false
+
+postgresql:
+  embedded: false
+
+minio:
+  embedded: false
+
+# Resource limits for production
+api:
+  replicaCount: 3
+  resources:
+    limits:
+      cpu: 2000m
+      memory: 2Gi
+    requests:
+      cpu: 1000m
+      memory: 1Gi
+
+frontend:
+  replicaCount: 2
+  resources:
+    limits:
+      cpu: 500m
+      memory: 512Mi
+    requests:
+      cpu: 250m
+      memory: 256Mi
+
+worker:
+  replicaCount: 2
+  resources:
+    limits:
+      cpu: 1000m
+      memory: 1Gi
+    requests:
+      cpu: 500m
+      memory: 512Mi
+```
+
+### With Vector Database (Milvus)
+
+```yaml
+global:
+  extraBackendEnvs:
+    - name: VECTOR_STORE
+      value: "milvus"
+    - name: MILVUS_HOST
+      value: "milvus.example.com"
+    - name: MILVUS_PORT
+      value: "19530"
+    - name: MILVUS_USER
+      value: "dify"
+    - name: MILVUS_PASSWORD
+      valueFrom:
+        secretKeyRef:
+          name: dify-secrets
+          key: MILVUS_PASSWORD
+```
+
+### With Google Cloud Storage
+
+```yaml
+global:
+  storageType: "google-storage"
+  extraBackendEnvs:
+    - name: GOOGLE_STORAGE_BUCKET_NAME
+      value: "my-dify-bucket"
+    - name: GOOGLE_STORAGE_SERVICE_ACCOUNT_JSON_BASE64
+      valueFrom:
+        secretKeyRef:
+          name: dify-secrets
+          key: GOOGLE_STORAGE_SERVICE_ACCOUNT_JSON_BASE64
+```
+
+<Accordion title="Gateway API Configuration">
+
+### HTTPRoute with Rate Limiting
+
+```yaml
+httpRoute:
+  enabled: true
+  gatewayRef:
+    name: envoy-gateway-bundle
+    namespace: envoy-gateway-system
+  hostnames:
+    - dify.example.com
+  globalRateLimit:
+    enabled: true
+    rules:
+      - clientSelectors:
+          - path:
+              type: PathPrefix
+              value: /v1/
+          - headers:
+              - name: Authorization
+                type: Distinct
+        limit:
+          requests: 120
+          unit: Minute
+```
+
+</Accordion>
+
+<Accordion title="Plugin Configuration">
+
+### Enable and Configure Plugin Daemon
+
+```yaml
+pluginDaemon:
+  enabled: true
+  replicaCount: 1
+  serverKey: "your-server-key-change-this"
+  difyInnerApiKey: "your-inner-api-key-change-this"
+  persistence:
+    enabled: true
+    size: 20Gi
+    accessMode: ReadWriteOnce
+```
+
+For production, use secrets:
+
+```yaml
+pluginDaemon:
+  enabled: true
+  serverKeySecret: "plugin-daemon-secrets"
+  difyInnerApiKeySecret: "plugin-daemon-secrets"
+```
+
+</Accordion>
+
+<Accordion title="Sandbox Configuration">
+
+### Custom Sandbox Settings
+
+```yaml
+sandbox:
+  replicaCount: 2
+  apiKey: "your-sandbox-api-key"
+  config:
+    python_requirements: |
+      numpy==1.20.3
+      scipy==1.6.3
+      pandas==1.3.0
+  envs:
+    - name: WORKER_TIMEOUT
+      value: "30"
+  resources:
+    limits:
+      cpu: 1000m
+      memory: 1Gi
+    requests:
+      cpu: 500m
+      memory: 512Mi
+```
+
+</Accordion>
+
+## Upgrade Guide
+
+1. Update the image tag in your values file:
+
+```yaml
+global:
+  image:
+    tag: "1.13.0"
+```
+
+2. Upgrade the release:
+
+```bash
+helm upgrade dify douban/dify -f values.yaml --debug
+```
+
+3. **Important:** Run database migrations after upgrade:
+
+```bash
+kubectl exec -it <dify-api-pod-name> -- flask db upgrade
+```
+
+## Production Checklist
+
+Before deploying to production, ensure you:
+
+1. **Set SECRET_KEY** - Generate a secure random key and store in Kubernetes Secret
+2. **Use External PostgreSQL** - Embedded PostgreSQL has no persistence by default
+3. **Use External Redis** - Embedded Redis has no persistence by default  
+4. **Configure External Storage** - Use S3, GCS, or Azure Blob Storage
+5. **Set up Vector Database** - Configure Milvus, Qdrant, or another vector store
+6. **Enable TLS** - Configure ingress with proper TLS certificates
+7. **Set Resource Limits** - Configure appropriate CPU and memory limits
+8. **Configure Backups** - Set up regular backups for database and storage
+9. **Protect Secrets** - Use Kubernetes Secrets for all sensitive data
+10. **Run Migrations** - Always run `flask db upgrade` after install/upgrade
+
+## Links
+
+- [Dify GitHub Repository](https://github.com/langgenius/dify)
+- [Dify Documentation](https://docs.dify.ai)
+- [Dify Environment Variables](https://docs.dify.ai/getting-started/install-self-hosted/environments)
+- [Chart Source](https://github.com/douban/charts)

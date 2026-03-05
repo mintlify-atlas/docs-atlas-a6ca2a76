@@ -1,0 +1,545 @@
+---
+title: CBS CSI Driver
+description: Tencent Cloud Block Storage CSI driver for dynamic volume provisioning
+---
+
+The CBS (Cloud Block Storage) CSI Driver enables Kubernetes to provision and manage Tencent Cloud block storage volumes dynamically using the Container Storage Interface (CSI).
+
+## Overview
+
+The CBS CSI Driver provides:
+
+- **Dynamic Provisioning**: Automatically create CBS volumes for PVCs
+- **Volume Snapshots**: Create and restore volume snapshots
+- **Volume Expansion**: Expand volumes without downtime
+- **Multiple Storage Classes**: Support for different CBS disk types
+- **Topology Awareness**: Zone-aware volume scheduling
+
+## Prerequisites
+
+- Kubernetes v1.14+
+- Tencent Cloud account with CBS access
+- Tencent Cloud API credentials (SecretId and SecretKey)
+- Node kubelet configured with `--allow-privileged=true`
+- Feature gates enabled:
+  - `VolumeSnapshotDataSource=true` (for snapshots)
+  - `VolumeScheduling=true` (for topology-aware scheduling)
+
+<Warning>
+  The CSI driver requires privileged access to mount volumes. Ensure your cluster security policies allow privileged containers in the kube-system namespace.
+</Warning>
+
+## Installation
+
+### Basic Installation
+
+Install with API credentials:
+
+```bash
+helm repo add douban https://douban.github.io/charts/
+helm install cbs-csi douban/cbs-csi-driver \
+  --namespace kube-system \
+  --set secret.secretId="YOUR_SECRET_ID" \
+  --set secret.secretKey="YOUR_SECRET_KEY"
+```
+
+### Using Existing Secret
+
+If you already have a secret with credentials:
+
+```bash
+# Create secret
+kubectl create secret generic cbs-csi-secret \
+  --from-literal=secretId="YOUR_SECRET_ID" \
+  --from-literal=secretKey="YOUR_SECRET_KEY" \
+  -n kube-system
+
+# Install using existing secret
+helm install cbs-csi douban/cbs-csi-driver \
+  --namespace kube-system \
+  --set secret.existingSecret=cbs-csi-secret
+```
+
+## Configuration
+
+### Essential Parameters
+
+| Parameter | Description | Default |
+|-----------|-------------|--------|
+| `secret.secretId` | Tencent Cloud API Secret ID | `""` |
+| `secret.secretKey` | Tencent Cloud API Secret Key | `""` |
+| `secret.existingSecret` | Use existing secret | `""` |
+| `storageClasses.enabled` | Create storage classes | `true` |
+| `controller.replicaCount` | Controller replicas | `1` |
+
+### Storage Classes Configuration
+
+The chart creates four storage classes by default:
+
+```yaml
+storageClasses:
+  enabled: true
+  common:
+    allowVolumeExpansion: "true"
+    reclaimPolicy: "Delete"
+    volumeBindingMode: "Immediate"
+    disktags: ""  # e.g., "env:prod,team:platform"
+  
+  classes:
+    # Premium SSD - Hourly billing (default)
+    - name: cbs-premium-hourly
+      isDefault: true
+      parameters:
+        diskChargeType: POSTPAID_BY_HOUR
+        diskType: CLOUD_PREMIUM
+    
+    # Premium SSD - Monthly billing
+    - name: cbs-premium-monthly
+      parameters:
+        diskChargePrepaidRenewFlag: NOTIFY_AND_AUTO_RENEW
+        diskChargeType: PREPAID
+        diskChargeTypePrepaidPeriod: "1"
+        diskType: CLOUD_PREMIUM
+    
+    # High-Performance SSD - Hourly billing
+    - name: cbs-ssd-hourly
+      parameters:
+        diskChargeType: POSTPAID_BY_HOUR
+        diskType: CLOUD_SSD
+    
+    # High-Performance SSD - Monthly billing
+    - name: cbs-ssd-monthly
+      parameters:
+        diskChargePrepaidRenewFlag: NOTIFY_AND_AUTO_RENEW
+        diskChargeType: PREPAID
+        diskChargeTypePrepaidPeriod: "1"
+        diskType: CLOUD_SSD
+```
+
+### Custom Storage Class
+
+Add a custom storage class:
+
+```yaml
+storageClasses:
+  classes:
+    - name: cbs-ultra-ssd
+      parameters:
+        diskChargeType: POSTPAID_BY_HOUR
+        diskType: CLOUD_HSSD  # Ultra SSD
+      allowVolumeExpansion: "true"
+      reclaimPolicy: "Retain"
+      volumeBindingMode: "WaitForFirstConsumer"
+```
+
+### Node Configuration
+
+Configure node DaemonSet:
+
+```yaml
+node:
+  image:
+    repository: ccr.ccs.tencentyun.com/tkeimages/csi-tencentcloud-cbs
+    tag: v2.3.3
+  resources:
+    limits:
+      memory: 256Mi
+    requests:
+      cpu: 100m
+      memory: 128Mi
+  tolerations:
+    - operator: Exists
+  priorityClassName: system-cluster-critical
+```
+
+### Controller Configuration
+
+Configure controller deployment:
+
+```yaml
+controller:
+  replicaCount: 2
+  image:
+    repository: ccr.ccs.tencentyun.com/tkeimages/csi-tencentcloud-cbs
+    tag: v2.3.3
+  resources:
+    limits:
+      cpu: 1
+      memory: 2Gi
+    requests:
+      cpu: 100m
+      memory: 100Mi
+  priorityClassName: system-cluster-critical
+```
+
+## Real-World Examples
+
+### Example 1: Basic PVC with Dynamic Provisioning
+
+```yaml
+apiVersion: v1
+kind: PersistentVolumeClaim
+metadata:
+  name: mysql-data
+  namespace: default
+spec:
+  accessModes:
+    - ReadWriteOnce
+  storageClassName: cbs-premium-hourly
+  resources:
+    requests:
+      storage: 100Gi
+---
+apiVersion: v1
+kind: Pod
+metadata:
+  name: mysql
+spec:
+  containers:
+    - name: mysql
+      image: mysql:8.0
+      env:
+        - name: MYSQL_ROOT_PASSWORD
+          value: "password"
+      volumeMounts:
+        - name: data
+          mountPath: /var/lib/mysql
+  volumes:
+    - name: data
+      persistentVolumeClaim:
+        claimName: mysql-data
+```
+
+### Example 2: StatefulSet with Volume Templates
+
+```yaml
+apiVersion: apps/v1
+kind: StatefulSet
+metadata:
+  name: postgresql
+spec:
+  serviceName: postgresql
+  replicas: 3
+  selector:
+    matchLabels:
+      app: postgresql
+  template:
+    metadata:
+      labels:
+        app: postgresql
+    spec:
+      containers:
+        - name: postgresql
+          image: postgres:14
+          ports:
+            - containerPort: 5432
+          env:
+            - name: POSTGRES_PASSWORD
+              value: "password"
+          volumeMounts:
+            - name: data
+              mountPath: /var/lib/postgresql/data
+  volumeClaimTemplates:
+    - metadata:
+        name: data
+      spec:
+        accessModes:
+          - ReadWriteOnce
+        storageClassName: cbs-ssd-hourly
+        resources:
+          requests:
+            storage: 50Gi
+```
+
+### Example 3: Volume Expansion
+
+```bash
+# Create initial PVC
+cat <<EOF | kubectl apply -f -
+apiVersion: v1
+kind: PersistentVolumeClaim
+metadata:
+  name: expandable-pvc
+spec:
+  accessModes:
+    - ReadWriteOnce
+  storageClassName: cbs-premium-hourly
+  resources:
+    requests:
+      storage: 20Gi
+EOF
+
+# Wait for PVC to be bound
+kubectl wait --for=jsonpath='{.status.phase}'=Bound pvc/expandable-pvc --timeout=120s
+
+# Expand the volume
+kubectl patch pvc expandable-pvc -p '{"spec":{"resources":{"requests":{"storage":"50Gi"}}}}'
+
+# Monitor expansion
+kubectl get pvc expandable-pvc -w
+```
+
+### Example 4: Volume Snapshots
+
+```yaml
+# Create a VolumeSnapshot
+apiVersion: snapshot.storage.k8s.io/v1
+kind: VolumeSnapshot
+metadata:
+  name: mysql-snapshot
+spec:
+  volumeSnapshotClassName: cbs-snapclass
+  source:
+    persistentVolumeClaimName: mysql-data
+---
+# Restore from snapshot
+apiVersion: v1
+kind: PersistentVolumeClaim
+metadata:
+  name: mysql-data-restored
+spec:
+  accessModes:
+    - ReadWriteOnce
+  storageClassName: cbs-premium-hourly
+  dataSource:
+    name: mysql-snapshot
+    kind: VolumeSnapshot
+    apiGroup: snapshot.storage.k8s.io
+  resources:
+    requests:
+      storage: 100Gi
+```
+
+## Testing the Installation
+
+Quick test to verify the CSI driver:
+
+```bash
+# Create test resources
+cat <<EOF | kubectl apply -f -
+apiVersion: v1
+kind: PersistentVolumeClaim
+metadata:
+  name: csi-test-pvc
+spec:
+  accessModes:
+    - ReadWriteOnce
+  resources:
+    requests:
+      storage: 20Gi
+  storageClassName: cbs-premium-hourly
+---
+apiVersion: v1
+kind: Pod
+metadata:
+  name: csi-test-app
+spec:
+  containers:
+    - name: app
+      image: busybox
+      command: ["/bin/sh", "-c"]
+      args:
+        - |
+          while true; do
+            echo "$(date) - Writing to CBS volume" >> /data/test.log
+            sleep 5
+          done
+      volumeMounts:
+        - mountPath: "/data"
+          name: csi-volume
+  volumes:
+    - name: csi-volume
+      persistentVolumeClaim:
+        claimName: csi-test-pvc
+EOF
+
+# Wait for resources
+kubectl wait --for=condition=ready pod/csi-test-app --timeout=180s
+
+# Verify data
+sleep 30
+kubectl exec csi-test-app -- cat /data/test.log
+
+# Cleanup
+kubectl delete -f -
+```
+
+## Troubleshooting
+
+### PVC Stuck in Pending
+
+1. Check CSI controller logs:
+```bash
+kubectl logs -n kube-system -l app=csi-cbsplugin -c csi-provisioner
+```
+
+2. Verify API credentials:
+```bash
+kubectl get secret -n kube-system | grep cbs
+kubectl get secret <secret-name> -n kube-system -o yaml
+```
+
+3. Check events:
+```bash
+kubectl describe pvc <pvc-name>
+```
+
+### Volume Mount Failures
+
+1. Check node plugin logs:
+```bash
+kubectl logs -n kube-system -l app=csi-cbsplugin -c cbs
+```
+
+2. Verify volume attachment:
+```bash
+kubectl get volumeattachment
+```
+
+3. Check node CSI registration:
+```bash
+kubectl get csinode
+```
+
+### API Authentication Errors
+
+Verify secret format:
+```bash
+kubectl get secret <secret-name> -n kube-system -o jsonpath='{.data.secretId}' | base64 -d
+```
+
+Ensure the API credentials have CBS permissions:
+- `cbs:CreateDisks`
+- `cbs:AttachDisks`
+- `cbs:DetachDisks`
+- `cbs:DescribeDisks`
+
+### Volume Expansion Not Working
+
+1. Verify storage class allows expansion:
+```bash
+kubectl get sc cbs-premium-hourly -o jsonpath='{.allowVolumeExpansion}'
+```
+
+2. Check expansion status:
+```bash
+kubectl describe pvc <pvc-name>
+```
+
+3. Controller logs:
+```bash
+kubectl logs -n kube-system -l app=csi-cbsplugin -c csi-resizer
+```
+
+## Advanced Configuration
+
+### Topology-Aware Scheduling
+
+Enable WaitForFirstConsumer for zone-aware scheduling:
+
+```yaml
+storageClasses:
+  classes:
+    - name: cbs-topology-aware
+      parameters:
+        diskChargeType: POSTPAID_BY_HOUR
+        diskType: CLOUD_PREMIUM
+      volumeBindingMode: WaitForFirstConsumer
+      allowedTopologies:
+        - matchLabelExpressions:
+            - key: topology.kubernetes.io/zone
+              values:
+                - ap-guangzhou-1
+                - ap-guangzhou-2
+```
+
+### Disk Tags
+
+Add tags to CBS volumes for billing and management:
+
+```yaml
+storageClasses:
+  common:
+    disktags: "environment:production,team:platform,cost-center:engineering"
+```
+
+### Custom Node Affinity
+
+Restrict where volumes can be provisioned:
+
+```yaml
+controller:
+  affinity:
+    nodeAffinity:
+      requiredDuringSchedulingIgnoredDuringExecution:
+        nodeSelectorTerms:
+          - matchExpressions:
+              - key: node.kubernetes.io/instance-type
+                operator: NotIn
+                values:
+                  - CHC
+                  - external
+```
+
+## Performance Considerations
+
+### IOPS and Throughput
+
+- **CLOUD_PREMIUM**: Up to 6,000 IOPS, 150 MB/s throughput
+- **CLOUD_SSD**: Up to 26,000 IOPS, 260 MB/s throughput
+- **CLOUD_HSSD**: Up to 100,000+ IOPS, 1000+ MB/s throughput
+
+### Best Practices
+
+1. Use `CLOUD_SSD` or higher for databases
+2. Use `WaitForFirstConsumer` for better zone distribution
+3. Set appropriate resource requests for controller
+4. Enable volume expansion for flexibility
+5. Use snapshots for backup and disaster recovery
+
+## Security Considerations
+
+<Warning>
+  Store API credentials securely. Never commit secrets to version control.
+</Warning>
+
+### RBAC Permissions
+
+The CSI driver requires cluster-level permissions:
+- Create/delete/attach/detach PersistentVolumes
+- Create/delete VolumeAttachments
+- Access to CSI node and driver registrar
+
+### Network Security
+
+The driver communicates with:
+- `metadata.tencentyun.com` (169.254.0.23)
+- `cbs.internal.tencentcloudapi.com` (169.254.0.95)
+
+Ensure these endpoints are accessible from nodes.
+
+## Uninstallation
+
+<Warning>
+  Uninstalling the CSI driver will not delete existing volumes, but you won't be able to manage them through Kubernetes. Delete all PVCs before uninstalling.
+</Warning>
+
+```bash
+# Delete all PVCs using CBS storage
+kubectl get pvc -A | grep cbs-
+
+# Uninstall the chart
+helm uninstall cbs-csi --namespace kube-system
+
+# Optionally delete CRDs
+kubectl delete crd volumesnapshots.snapshot.storage.k8s.io
+kubectl delete crd volumesnapshotcontents.snapshot.storage.k8s.io
+kubectl delete crd volumesnapshotclasses.snapshot.storage.k8s.io
+```
+
+## Additional Resources
+
+- [Tencent Cloud CBS Documentation](https://cloud.tencent.com/document/product/362)
+- [CSI Specification](https://github.com/container-storage-interface/spec)
+- [Kubernetes CSI Documentation](https://kubernetes-csi.github.io/docs/)
+- [CBS CSI Driver GitHub](https://github.com/TencentCloud/kubernetes-csi-tencentcloud)

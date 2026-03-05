@@ -1,0 +1,194 @@
+---
+title: Aliyun Exporter
+description: Export Alibaba Cloud metrics to Prometheus
+---
+
+The Aliyun Exporter chart deploys a Prometheus exporter for Alibaba Cloud (Aliyun) services, allowing you to monitor your cloud infrastructure metrics.
+
+## What It Monitors
+
+This exporter collects metrics from various Alibaba Cloud services including:
+
+- Elastic Compute Service (ECS)
+- Relational Database Service (RDS)
+- Server Load Balancer (SLB)
+- Object Storage Service (OSS)
+- Redis and other managed services
+
+## Installation
+
+### Prerequisites
+
+You need Alibaba Cloud credentials with read permissions for CloudMonitor API.
+
+### Basic Installation
+
+```bash
+helm repo add douban https://douban.github.io/charts
+helm install aliyun-exporter douban/aliyun-exporter
+```
+
+## Authentication Configuration
+
+<Warning>
+  Never commit Alibaba Cloud credentials to version control. Use Kubernetes secrets or external secret management solutions.
+</Warning>
+
+### Using Environment Variables
+
+Configure credentials via environment variables:
+
+```yaml
+extraEnvs:
+  - name: ALIYUN_ACCESS_KEY_ID
+    valueFrom:
+      secretKeyRef:
+        name: aliyun-credentials
+        key: access-key-id
+  - name: ALIYUN_ACCESS_KEY_SECRET
+    valueFrom:
+      secretKeyRef:
+        name: aliyun-credentials
+        key: access-key-secret
+  - name: ALIYUN_REGION
+    value: "cn-hangzhou"
+```
+
+<ParamField path="extraEnvs" type="array" default="[]">
+  Additional environment variables for authentication and configuration
+</ParamField>
+
+### Create Credentials Secret
+
+First, create a Kubernetes secret with your credentials:
+
+```bash
+kubectl create secret generic aliyun-credentials \
+  --from-literal=access-key-id="YOUR_ACCESS_KEY_ID" \
+  --from-literal=access-key-secret="YOUR_ACCESS_KEY_SECRET"
+```
+
+## Configuration
+
+<ParamField path="args" type="array" default="[]">
+  Additional command-line arguments for the exporter
+</ParamField>
+
+<ParamField path="image.repository" type="string" default="ghcr.io/douban/aliyun-exporter">
+  Container image repository
+</ParamField>
+
+<ParamField path="image.tag" type="string" default="main">
+  Container image tag
+</ParamField>
+
+<ParamField path="containerPort" type="number" default="9180">
+  Port the exporter listens on
+</ParamField>
+
+<ParamField path="service.port" type="number" default="9180">
+  Service port to expose metrics on
+</ParamField>
+
+## ServiceMonitor Configuration
+
+To enable automatic Prometheus scraping via the Prometheus Operator:
+
+```yaml
+serviceMonitor:
+  enabled: true
+  interval: 60s
+  labels:
+    prometheus: kube-prometheus
+```
+
+<ParamField path="serviceMonitor.enabled" type="boolean" default="false">
+  Enable ServiceMonitor resource creation
+</ParamField>
+
+<ParamField path="serviceMonitor.interval" type="string" default="30s">
+  How frequently Prometheus should scrape (recommended: 60s for cloud APIs)
+</ParamField>
+
+## Manual Prometheus Configuration
+
+If not using the Prometheus Operator:
+
+```yaml
+scrape_configs:
+  - job_name: 'aliyun-exporter'
+    static_configs:
+      - targets: ['aliyun-exporter:9180']
+    scrape_interval: 60s
+    scrape_timeout: 30s
+```
+
+## Example Values
+
+```yaml
+replicaCount: 1
+
+image:
+  repository: ghcr.io/douban/aliyun-exporter
+  tag: "main"
+  pullPolicy: IfNotPresent
+
+extraEnvs:
+  - name: ALIYUN_ACCESS_KEY_ID
+    valueFrom:
+      secretKeyRef:
+        name: aliyun-credentials
+        key: access-key-id
+  - name: ALIYUN_ACCESS_KEY_SECRET
+    valueFrom:
+      secretKeyRef:
+        name: aliyun-credentials
+        key: access-key-secret
+  - name: ALIYUN_REGION
+    value: "cn-hangzhou"
+
+service:
+  type: ClusterIP
+  port: 9180
+
+serviceMonitor:
+  enabled: true
+  interval: 60s
+  timeout: 30s
+  labels:
+    release: prometheus
+
+resources:
+  limits:
+    cpu: 200m
+    memory: 256Mi
+  requests:
+    cpu: 100m
+    memory: 128Mi
+```
+
+## Metrics Exposed
+
+Metrics are available at the `/metrics` endpoint. The specific metrics depend on which Alibaba Cloud services you're monitoring:
+
+- `aliyun_ecs_*` - ECS instance metrics (CPU, memory, disk, network)
+- `aliyun_rds_*` - RDS database metrics (connections, IOPS, storage)
+- `aliyun_slb_*` - Load balancer metrics (connections, traffic)
+- `aliyun_oss_*` - Object storage metrics (requests, bandwidth)
+
+## Security Best Practices
+
+<Warning>
+  Follow these security practices when deploying the exporter:
+</Warning>
+
+1. **Use IAM roles with minimal permissions** - Only grant CloudMonitor read access
+2. **Rotate credentials regularly** - Update secrets periodically
+3. **Use Kubernetes secrets** - Never hardcode credentials in values.yaml
+4. **Consider external secrets** - Use solutions like External Secrets Operator or Vault
+5. **Network policies** - Restrict access to the exporter service
+
+## Resources
+
+- [Aliyun Exporter GitHub](https://github.com/douban/aliyun-exporter)
+- [Alibaba Cloud CloudMonitor Documentation](https://www.alibabacloud.com/help/en/cloudmonitor/)

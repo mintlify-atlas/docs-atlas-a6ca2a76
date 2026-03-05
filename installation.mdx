@@ -1,0 +1,727 @@
+---
+title: Installation
+description: Comprehensive guide to installing and managing Douban Helm Charts
+---
+
+## Prerequisites
+
+Before installing any Douban Helm Charts, ensure your environment meets these requirements:
+
+### Required Components
+
+<CardGroup cols={2}>
+  <Card title="Kubernetes Cluster" icon="dharmachakra">
+    Version 1.19 or higher running and accessible
+  </Card>
+  
+  <Card title="Helm" icon="download">
+    Version 3.0 or higher installed locally
+  </Card>
+  
+  <Card title="kubectl" icon="terminal">
+    Configured to communicate with your cluster
+  </Card>
+  
+  <Card title="Cluster Permissions" icon="key">
+    Sufficient RBAC permissions to create resources
+  </Card>
+</CardGroup>
+
+### Verify Your Setup
+
+Check your Kubernetes cluster:
+
+```bash
+kubectl cluster-info
+kubectl version --short
+```
+
+Check your Helm installation:
+
+```bash
+helm version
+```
+
+Expected output:
+
+```
+version.BuildInfo{Version:"v3.14.0", GitCommit:"...", GitTreeState:"clean", GoVersion:"go1.21.5"}
+```
+
+<Note>
+  Helm v2 is no longer supported. Ensure you're using Helm v3 or later.
+</Note>
+
+## Installing Helm
+
+If you don't have Helm installed, follow these platform-specific instructions:
+
+<Tabs>
+  <Tab title="macOS">
+    Using Homebrew:
+    
+    ```bash
+    brew install helm
+    ```
+    
+    Verify installation:
+    
+    ```bash
+    helm version
+    ```
+  </Tab>
+  
+  <Tab title="Linux">
+    Using the installation script:
+    
+    ```bash
+    curl https://raw.githubusercontent.com/helm/helm/main/scripts/get-helm-3 | bash
+    ```
+    
+    Or using package managers:
+    
+    <CodeGroup>
+    ```bash Ubuntu/Debian
+    curl https://baltocdn.com/helm/signing.asc | gpg --dearmor | sudo tee /usr/share/keyrings/helm.gpg > /dev/null
+    sudo apt-get install apt-transport-https --yes
+    echo "deb [arch=$(dpkg --print-architecture) signed-by=/usr/share/keyrings/helm.gpg] https://baltocdn.com/helm/stable/debian/ all main" | sudo tee /etc/apt/sources.list.d/helm-stable-debian.list
+    sudo apt-get update
+    sudo apt-get install helm
+    ```
+    
+    ```bash Fedora/RHEL
+    sudo dnf install helm
+    ```
+    </CodeGroup>
+  </Tab>
+  
+  <Tab title="Windows">
+    Using Chocolatey:
+    
+    ```powershell
+    choco install kubernetes-helm
+    ```
+    
+    Using Scoop:
+    
+    ```powershell
+    scoop install helm
+    ```
+    
+    Or download the binary from [GitHub Releases](https://github.com/helm/helm/releases).
+  </Tab>
+</Tabs>
+
+## Repository Setup
+
+### Adding the Douban Repository
+
+Add the Douban Helm Charts repository:
+
+```bash
+helm repo add douban https://douban.github.io/charts/
+```
+
+Successful output:
+
+```
+"douban" has been added to your repositories
+```
+
+### Updating Repository Cache
+
+Update your local cache to fetch the latest chart versions:
+
+```bash
+helm repo update
+```
+
+Output:
+
+```
+Hang tight while we grab the latest from your chart repositories...
+...Successfully got an update from the "douban" chart repository
+Update Complete. Happy Helming!
+```
+
+<Note>
+  Run `helm repo update` regularly to ensure you have access to the latest chart versions.
+</Note>
+
+### Verifying Repository Configuration
+
+List all configured repositories:
+
+```bash
+helm repo list
+```
+
+Expected output:
+
+```
+NAME      URL
+douban    https://douban.github.io/charts/
+```
+
+## Browsing Available Charts
+
+### List All Douban Charts
+
+```bash
+helm search repo douban
+```
+
+Output:
+
+```
+NAME                                    CHART VERSION   APP VERSION     DESCRIPTION
+douban/aliyun-exporter                  0.1.0          1.0.0           Aliyun CloudMonitor exporter for Prometheus
+douban/helpdesk                         0.3.3          0.2.0           A Helm chart for Douban Helpdesk
+douban/nginx                            0.4.1          1.16.0          A Helm chart for Kubernetes
+douban/overlord                         0.1.0          1.0.0           Distributed caching service
+...
+```
+
+### Search for Specific Charts
+
+Search by keyword:
+
+```bash
+helm search repo douban/nginx
+```
+
+Search across all versions:
+
+```bash
+helm search repo douban/nginx --versions
+```
+
+### View Chart Information
+
+View chart metadata:
+
+```bash
+helm show chart douban/nginx
+```
+
+View default values:
+
+```bash
+helm show values douban/nginx
+```
+
+View full chart information:
+
+```bash
+helm show all douban/nginx
+```
+
+## Installing Charts
+
+### Basic Installation
+
+Install a chart with default values:
+
+```bash
+helm install [RELEASE_NAME] douban/[CHART_NAME]
+```
+
+Example:
+
+```bash
+helm install my-nginx douban/nginx
+```
+
+### Installation with Custom Values
+
+#### Using a Values File
+
+Create a custom values file `custom-values.yaml`:
+
+```yaml custom-values.yaml
+replicaCount: 3
+
+image:
+  repository: nginx
+  tag: "1.25.0"
+  pullPolicy: IfNotPresent
+
+resources:
+  limits:
+    cpu: 200m
+    memory: 256Mi
+  requests:
+    cpu: 100m
+    memory: 128Mi
+
+service:
+  type: ClusterIP
+  port: 80
+
+autoscaling:
+  enabled: true
+  minReplicas: 2
+  maxReplicas: 10
+  targetCPUUtilizationPercentage: 70
+```
+
+Install with custom values:
+
+```bash
+helm install my-nginx douban/nginx -f custom-values.yaml
+```
+
+#### Using --set Flags
+
+Override specific values inline:
+
+```bash
+helm install my-nginx douban/nginx \
+  --set replicaCount=3 \
+  --set image.tag=1.25.0 \
+  --set resources.requests.memory=128Mi
+```
+
+#### Combining Multiple Values Files
+
+```bash
+helm install my-nginx douban/nginx \
+  -f base-values.yaml \
+  -f production-values.yaml \
+  --set service.type=LoadBalancer
+```
+
+<Note>
+  Values are merged in order. Later values override earlier ones: file1 < file2 < --set flags
+</Note>
+
+### Installation Options
+
+#### Install in a Specific Namespace
+
+```bash
+helm install my-nginx douban/nginx --namespace production --create-namespace
+```
+
+#### Dry Run (Preview Installation)
+
+See what would be installed without actually installing:
+
+```bash
+helm install my-nginx douban/nginx --dry-run --debug
+```
+
+#### Wait for Resources to be Ready
+
+```bash
+helm install my-nginx douban/nginx --wait --timeout 5m
+```
+
+#### Generate Kubernetes Manifests
+
+Generate YAML without installing:
+
+```bash
+helm template my-nginx douban/nginx > nginx-manifests.yaml
+```
+
+## Common Installation Patterns
+
+### Pattern 1: Web Application with Ingress
+
+```yaml web-app-values.yaml
+replicaCount: 2
+
+image:
+  repository: nginx
+  tag: "1.25.0"
+
+ingress:
+  enabled: true
+  className: nginx
+  annotations:
+    cert-manager.io/cluster-issuer: letsencrypt-prod
+  hosts:
+    - host: app.example.com
+      paths:
+        - path: /
+          pathType: Prefix
+  tls:
+    - secretName: app-tls
+      hosts:
+        - app.example.com
+
+resources:
+  limits:
+    cpu: 500m
+    memory: 512Mi
+  requests:
+    cpu: 250m
+    memory: 256Mi
+```
+
+```bash
+helm install web-app douban/nginx -f web-app-values.yaml
+```
+
+### Pattern 2: Application with Monitoring
+
+```yaml monitored-app-values.yaml
+replicaCount: 3
+
+serviceMonitor:
+  enabled: true
+
+prometheusRule:
+  enabled: true
+  additionalLabels:
+    release: prometheus-operator
+  rules:
+    - alert: HighErrorRate
+      expr: rate(http_requests_total{status=~"5.."}[5m]) > 0.05
+      annotations:
+        summary: High HTTP error rate detected
+```
+
+```bash
+helm install monitored-app douban/nginx -f monitored-app-values.yaml
+```
+
+### Pattern 3: High-Availability Deployment
+
+```yaml ha-values.yaml
+replicaCount: 5
+
+autoscaling:
+  enabled: true
+  minReplicas: 3
+  maxReplicas: 20
+  targetCPUUtilizationPercentage: 60
+  targetMemoryUtilizationPercentage: 80
+
+affinity:
+  podAntiAffinity:
+    preferredDuringSchedulingIgnoredDuringExecution:
+      - weight: 100
+        podAffinityTerm:
+          labelSelector:
+            matchExpressions:
+              - key: app.kubernetes.io/name
+                operator: In
+                values:
+                  - nginx
+          topologyKey: kubernetes.io/hostname
+
+resources:
+  limits:
+    cpu: 1000m
+    memory: 1Gi
+  requests:
+    cpu: 500m
+    memory: 512Mi
+```
+
+```bash
+helm install ha-app douban/nginx -f ha-values.yaml
+```
+
+## Upgrading Charts
+
+### Basic Upgrade
+
+Upgrade to the latest chart version:
+
+```bash
+helm upgrade my-nginx douban/nginx
+```
+
+### Upgrade with New Values
+
+```bash
+helm upgrade my-nginx douban/nginx -f updated-values.yaml
+```
+
+### Upgrade to Specific Chart Version
+
+```bash
+helm upgrade my-nginx douban/nginx --version 0.4.1
+```
+
+### Upgrade with Rollback on Failure
+
+```bash
+helm upgrade my-nginx douban/nginx --atomic --timeout 5m
+```
+
+<Note>
+  The `--atomic` flag automatically rolls back changes if the upgrade fails.
+</Note>
+
+### Reuse Values from Previous Release
+
+```bash
+helm upgrade my-nginx douban/nginx --reuse-values
+```
+
+### View Upgrade Diff
+
+Before upgrading, see what would change:
+
+```bash
+helm diff upgrade my-nginx douban/nginx -f new-values.yaml
+```
+
+## Managing Releases
+
+### List Releases
+
+List all releases in current namespace:
+
+```bash
+helm list
+```
+
+List releases across all namespaces:
+
+```bash
+helm list --all-namespaces
+```
+
+Include uninstalled and failed releases:
+
+```bash
+helm list --all
+```
+
+### View Release Status
+
+```bash
+helm status my-nginx
+```
+
+### View Release History
+
+```bash
+helm history my-nginx
+```
+
+Output:
+
+```
+REVISION  UPDATED                   STATUS      CHART         APP VERSION  DESCRIPTION
+1         Thu Mar 5 10:00:00 2026   superseded  nginx-0.4.0  1.16.0       Install complete
+2         Thu Mar 5 11:00:00 2026   deployed    nginx-0.4.1  1.16.0       Upgrade complete
+```
+
+### Get Release Values
+
+View values used in current release:
+
+```bash
+helm get values my-nginx
+```
+
+View all values (including defaults):
+
+```bash
+helm get values my-nginx --all
+```
+
+### Get Release Manifest
+
+View rendered Kubernetes manifests:
+
+```bash
+helm get manifest my-nginx
+```
+
+## Rolling Back Releases
+
+### Rollback to Previous Revision
+
+```bash
+helm rollback my-nginx
+```
+
+### Rollback to Specific Revision
+
+```bash
+helm rollback my-nginx 1
+```
+
+### Rollback with Wait
+
+```bash
+helm rollback my-nginx --wait --timeout 5m
+```
+
+## Uninstalling Charts
+
+### Basic Uninstall
+
+```bash
+helm uninstall my-nginx
+```
+
+### Uninstall with Release History Retention
+
+Keep release history for potential rollback:
+
+```bash
+helm uninstall my-nginx --keep-history
+```
+
+### Uninstall from Specific Namespace
+
+```bash
+helm uninstall my-nginx --namespace production
+```
+
+## Advanced Topics
+
+### Using Chart Dependencies
+
+Some charts may have dependencies. Install with dependency update:
+
+```bash
+helm dependency update douban/helpdesk
+helm install my-helpdesk douban/helpdesk
+```
+
+### Working with Chart Repositories
+
+Remove a repository:
+
+```bash
+helm repo remove douban
+```
+
+Re-add after removal:
+
+```bash
+helm repo add douban https://douban.github.io/charts/
+```
+
+### Debugging Failed Installations
+
+Enable debug output:
+
+```bash
+helm install my-nginx douban/nginx --debug
+```
+
+View pod logs:
+
+```bash
+kubectl logs -l app.kubernetes.io/name=nginx
+```
+
+Describe failing resources:
+
+```bash
+kubectl describe pod -l app.kubernetes.io/name=nginx
+```
+
+## Best Practices
+
+<CardGroup cols={2}>
+  <Card title="Version Pinning" icon="thumbtack">
+    Always specify chart versions in production:
+    ```bash
+    helm install my-app douban/nginx --version 0.4.1
+    ```
+  </Card>
+  
+  <Card title="Values Management" icon="file-code">
+    Use values files for configuration management and version control:
+    ```bash
+    helm install my-app douban/nginx -f prod-values.yaml
+    ```
+  </Card>
+  
+  <Card title="Dry Run Testing" icon="flask">
+    Always test before applying to production:
+    ```bash
+    helm upgrade my-app douban/nginx --dry-run --debug
+    ```
+  </Card>
+  
+  <Card title="Namespace Isolation" icon="layer-group">
+    Use separate namespaces for different environments:
+    ```bash
+    helm install my-app douban/nginx -n production
+    ```
+  </Card>
+</CardGroup>
+
+### Resource Management
+
+Always set resource limits and requests:
+
+```yaml
+resources:
+  limits:
+    cpu: 500m
+    memory: 512Mi
+  requests:
+    cpu: 250m
+    memory: 256Mi
+```
+
+### Monitoring Integration
+
+Enable monitoring for production deployments:
+
+```yaml
+serviceMonitor:
+  enabled: true
+
+prometheusRule:
+  enabled: true
+```
+
+## Troubleshooting
+
+### Chart Not Found
+
+```bash
+helm repo update
+helm search repo douban
+```
+
+### Installation Timeout
+
+Increase timeout:
+
+```bash
+helm install my-nginx douban/nginx --timeout 10m
+```
+
+### Resource Conflicts
+
+Check existing resources:
+
+```bash
+kubectl get all -l app.kubernetes.io/name=nginx
+```
+
+### Permission Denied
+
+Verify RBAC permissions:
+
+```bash
+kubectl auth can-i create deployments
+kubectl auth can-i create services
+```
+
+## Next Steps
+
+<CardGroup cols={2}>
+  <Card title="Chart Documentation" icon="book" href="/charts/nginx">
+    Explore detailed documentation for each available chart
+  </Card>
+  
+  <Card title="Configuration Reference" icon="gear" href="/configuration/values">
+    Learn about advanced configuration options
+  </Card>
+</CardGroup>

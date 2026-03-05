@@ -1,0 +1,317 @@
+---
+title: Probot
+description: GitHub App framework for building automation bots
+---
+
+Probot is a framework for building GitHub Apps in Node.js that automate and improve workflows.
+
+## Overview
+
+Probot provides a simple framework for creating GitHub Apps that respond to webhook events. Use it to automate common tasks, enforce policies, or integrate with external services.
+
+## Installation
+
+```bash
+helm repo add douban https://douban.github.io/charts/
+helm repo update
+helm install probot douban/probot
+```
+
+<Note>
+This chart provides infrastructure for running a Probot app. You must supply your own Probot application image.
+</Note>
+
+## Configuration
+
+### Basic Configuration
+
+```yaml
+image:
+  repository: your-registry/your-probot-app
+  tag: latest
+  pullPolicy: IfNotPresent
+
+replicaCount: 1
+
+service:
+  type: ClusterIP
+  port: 80
+```
+
+### GitHub App Configuration
+
+Configure environment variables for your GitHub App:
+
+```yaml
+envConfigs:
+  - name: APP_ID
+    value: "123456"  # Your GitHub App ID
+  - name: GHE_HOST
+    value: github.com  # or your GHE instance
+  - name: LOG_LEVEL
+    value: info
+  - name: WEBHOOK_SECRET
+    value: "your-webhook-secret"
+```
+
+### Using Secrets
+
+Store sensitive values in Kubernetes secrets:
+
+```yaml
+envConfigs:
+  - name: APP_ID
+    value: "123456"
+  - name: WEBHOOK_SECRET
+    valueFrom:
+      secretKeyRef:
+        name: probot-secrets
+        key: webhook-secret
+  - name: PRIVATE_KEY
+    valueFrom:
+      secretKeyRef:
+        name: probot-secrets
+        key: private-key
+  - name: GITHUB_TOKEN
+    valueFrom:
+      secretKeyRef:
+        name: probot-secrets
+        key: github-token
+```
+
+### GitHub Enterprise
+
+```yaml
+envConfigs:
+  - name: APP_ID
+    value: "123456"
+  - name: GHE_HOST
+    value: github.example.com
+  - name: GHE_PROTOCOL
+    value: https
+  - name: LOG_LEVEL
+    value: debug
+```
+
+## Access Configuration
+
+### Ingress
+
+```yaml
+ingress:
+  enabled: true
+  className: "nginx"
+  annotations:
+    cert-manager.io/cluster-issuer: "letsencrypt"
+  hosts:
+    - host: probot.example.com
+      paths:
+        - path: /
+          pathType: ImplementationSpecific
+  tls:
+    - secretName: probot-tls
+      hosts:
+        - probot.example.com
+```
+
+## Example Values
+
+### Basic Probot App
+
+```yaml
+image:
+  repository: myregistry/my-probot-app
+  tag: v1.0.0
+  pullPolicy: IfNotPresent
+
+replicaCount: 1
+
+envConfigs:
+  - name: APP_ID
+    value: "123456"
+  - name: GHE_HOST
+    value: github.com
+  - name: LOG_LEVEL
+    value: info
+  - name: WEBHOOK_SECRET
+    valueFrom:
+      secretKeyRef:
+        name: probot-app-secrets
+        key: webhook-secret
+  - name: PRIVATE_KEY
+    valueFrom:
+      secretKeyRef:
+        name: probot-app-secrets
+        key: private-key
+
+service:
+  type: ClusterIP
+  port: 80
+
+ingress:
+  enabled: true
+  className: "nginx"
+  hosts:
+    - host: my-bot.example.com
+      paths:
+        - path: /
+          pathType: ImplementationSpecific
+
+resources:
+  limits:
+    cpu: 500m
+    memory: 512Mi
+  requests:
+    cpu: 100m
+    memory: 128Mi
+```
+
+### Production Setup with Autoscaling
+
+```yaml
+image:
+  repository: myregistry/probot-production
+  tag: v2.1.0
+  pullPolicy: IfNotPresent
+
+replicaCount: 2
+
+envConfigs:
+  - name: APP_ID
+    valueFrom:
+      secretKeyRef:
+        name: github-app-prod
+        key: app-id
+  - name: GHE_HOST
+    value: github.com
+  - name: LOG_LEVEL
+    value: warn
+  - name: WEBHOOK_SECRET
+    valueFrom:
+      secretKeyRef:
+        name: github-app-prod
+        key: webhook-secret
+  - name: PRIVATE_KEY
+    valueFrom:
+      secretKeyRef:
+        name: github-app-prod
+        key: private-key
+  - name: REDIS_URL
+    valueFrom:
+      secretKeyRef:
+        name: redis-connection
+        key: url
+  - name: SENTRY_DSN
+    valueFrom:
+      secretKeyRef:
+        name: monitoring-secrets
+        key: sentry-dsn
+
+service:
+  type: ClusterIP
+  port: 80
+
+ingress:
+  enabled: true
+  className: "nginx"
+  annotations:
+    cert-manager.io/cluster-issuer: "letsencrypt-prod"
+    nginx.ingress.kubernetes.io/rate-limit: "100"
+  hosts:
+    - host: probot-prod.example.com
+      paths:
+        - path: /
+          pathType: ImplementationSpecific
+  tls:
+    - secretName: probot-prod-tls
+      hosts:
+        - probot-prod.example.com
+
+resources:
+  limits:
+    cpu: 1000m
+    memory: 1Gi
+  requests:
+    cpu: 200m
+    memory: 256Mi
+
+autoscaling:
+  enabled: true
+  minReplicas: 2
+  maxReplicas: 10
+  targetCPUUtilizationPercentage: 80
+
+podAnnotations:
+  prometheus.io/scrape: "true"
+  prometheus.io/port: "3000"
+```
+
+## Key Parameters
+
+| Parameter | Description | Default |
+|-----------|-------------|----------|
+| `image.repository` | Probot app image | `nginx` |
+| `image.tag` | Image tag | `""` |
+| `replicaCount` | Number of replicas | `1` |
+| `service.port` | Service port | `80` |
+| `envConfigs` | Environment variables | See values |
+
+## Common Environment Variables
+
+| Variable | Description | Required |
+|----------|-------------|----------|
+| `APP_ID` | GitHub App ID | Yes |
+| `WEBHOOK_SECRET` | Webhook secret | Yes |
+| `PRIVATE_KEY` | GitHub App private key | Yes |
+| `GHE_HOST` | GitHub hostname | No |
+| `GHE_PROTOCOL` | GitHub protocol (https/http) | No |
+| `LOG_LEVEL` | Logging level | No |
+| `PORT` | Server port | No |
+
+## Creating a Probot App
+
+Example Dockerfile for a Probot app:
+
+```dockerfile
+FROM node:18-alpine
+
+WORKDIR /app
+
+# Install dependencies
+COPY package*.json ./
+RUN npm ci --production
+
+# Copy application code
+COPY . .
+
+EXPOSE 3000
+
+CMD ["npm", "start"]
+```
+
+Basic Probot app structure:
+
+```javascript
+// index.js
+module.exports = (app) => {
+  app.on('issues.opened', async (context) => {
+    const issueComment = context.issue({
+      body: 'Thanks for opening this issue!',
+    });
+    return context.octokit.issues.createComment(issueComment);
+  });
+};
+```
+
+## Requirements
+
+- Kubernetes 1.16+
+- Helm 3+
+- GitHub App with webhook configured
+- Custom Probot application image
+
+## Useful Links
+
+- [Probot Documentation](https://probot.github.io/docs/)
+- [Creating a GitHub App](https://docs.github.com/apps/creating-github-apps)
+- [Probot Apps](https://probot.github.io/apps/)

@@ -1,0 +1,260 @@
+---
+title: Tencent Cloud Info Exporter
+description: Export Tencent Cloud resource information and metadata to Prometheus
+---
+
+The Tencent Cloud Info Exporter chart deploys a specialized exporter that provides resource information and metadata from Tencent Cloud services, complementing the standard metrics exporter with inventory and configuration data.
+
+## What It Monitors
+
+This exporter collects resource information and metadata including:
+
+- Cloud Block Storage (CBS) inventory and configuration
+- Instance metadata and tags
+- Resource relationships and dependencies
+- Configuration details not available in standard metrics
+
+## Difference from Standard Exporter
+
+While `tencentcloud-exporter` focuses on **metrics** (CPU, memory, etc.), `tencentcloud-info-exporter` provides **metadata and inventory information** about your cloud resources. Use both together for complete visibility.
+
+## Installation
+
+### Prerequisites
+
+You need Tencent Cloud API credentials (SecretId and SecretKey) with read permissions.
+
+### Basic Installation
+
+```bash
+helm repo add douban https://douban.github.io/charts
+helm install tc-info-exporter douban/tencentcloud-info-exporter \
+  --set args[0]="--metrics.cbs"
+```
+
+## Authentication Configuration
+
+<Warning>
+  Never commit Tencent Cloud credentials to version control. Always use Kubernetes secrets.
+</Warning>
+
+### Using Environment Variables
+
+```yaml
+extraEnvs:
+  - name: TENCENTCLOUD_SECRET_ID
+    valueFrom:
+      secretKeyRef:
+        name: tencentcloud-credentials
+        key: secret-id
+  - name: TENCENTCLOUD_SECRET_KEY
+    valueFrom:
+      secretKeyRef:
+        name: tencentcloud-credentials
+        key: secret-key
+  - name: TENCENTCLOUD_REGION
+    value: "ap-guangzhou"
+```
+
+<ParamField path="extraEnvs" type="array" default="[]">
+  Environment variables for authentication and configuration
+</ParamField>
+
+### Create Credentials Secret
+
+```bash
+kubectl create secret generic tencentcloud-credentials \
+  --from-literal=secret-id="YOUR_SECRET_ID" \
+  --from-literal=secret-key="YOUR_SECRET_KEY"
+```
+
+## Configuration
+
+<ParamField path="args" type="array">
+  Command-line arguments to enable specific metric collectors. Default: `["--metrics.cbs"]`
+</ParamField>
+
+### Available Collectors
+
+Enable different resource type collectors:
+
+```yaml
+args:
+  - "--metrics.cbs"    # Cloud Block Storage
+  - "--metrics.cvm"    # Cloud Virtual Machines
+  - "--metrics.vpc"    # Virtual Private Cloud
+```
+
+<ParamField path="image.repository" type="string" default="ghcr.io/leoquote/tencentcloud-info-exporter">
+  Container image repository
+</ParamField>
+
+<ParamField path="image.tag" type="string" default="main">
+  Container image tag
+</ParamField>
+
+<ParamField path="containerPort" type="number" default="9150">
+  Port the exporter listens on
+</ParamField>
+
+<ParamField path="service.port" type="number" default="9150">
+  Service port to expose metrics
+</ParamField>
+
+## ServiceMonitor Configuration
+
+For automatic Prometheus scraping:
+
+```yaml
+serviceMonitor:
+  enabled: true
+  interval: 5m
+  labels:
+    prometheus: kube-prometheus
+```
+
+<ParamField path="serviceMonitor.enabled" type="boolean" default="false">
+  Enable ServiceMonitor resource creation
+</ParamField>
+
+<ParamField path="serviceMonitor.interval" type="string" default="30s">
+  Scrape interval (5m recommended for inventory data)
+</ParamField>
+
+## ScrapeConfig (Recommended)
+
+```yaml
+scrapeConfig:
+  enabled: true
+  interval: 1m
+  timeout: 10s
+  relabelings:
+    - regex: 'container|endpoint|pod|service|instance'
+      action: "labeldrop"
+  metricRelabelings:
+    - regex: 'instance'
+      action: "labeldrop"
+```
+
+<ParamField path="scrapeConfig.enabled" type="boolean" default="false">
+  Enable ScrapeConfig resource (recommended over ServiceMonitor)
+</ParamField>
+
+<ParamField path="scrapeConfig.interval" type="string" default="1m">
+  How frequently to scrape inventory data
+</ParamField>
+
+## Manual Prometheus Configuration
+
+If not using Prometheus Operator:
+
+```yaml
+scrape_configs:
+  - job_name: 'tencentcloud-info-exporter'
+    static_configs:
+      - targets: ['tencentcloud-info-exporter:9150']
+    scrape_interval: 5m
+    scrape_timeout: 30s
+```
+
+## Example Values
+
+```yaml
+replicaCount: 1
+
+image:
+  repository: ghcr.io/leoquote/tencentcloud-info-exporter
+  tag: "main"
+  pullPolicy: IfNotPresent
+
+args:
+  - "--metrics.cbs"
+  - "--metrics.cvm"
+
+extraEnvs:
+  - name: TENCENTCLOUD_SECRET_ID
+    valueFrom:
+      secretKeyRef:
+        name: tencentcloud-credentials
+        key: secret-id
+  - name: TENCENTCLOUD_SECRET_KEY
+    valueFrom:
+      secretKeyRef:
+        name: tencentcloud-credentials
+        key: secret-key
+  - name: TENCENTCLOUD_REGION
+    value: "ap-guangzhou"
+
+service:
+  type: ClusterIP
+  port: 9150
+
+scrapeConfig:
+  enabled: true
+  interval: 5m
+  timeout: 30s
+  relabelings:
+    - regex: 'container|endpoint|pod|service|instance'
+      action: "labeldrop"
+
+resources:
+  limits:
+    cpu: 200m
+    memory: 256Mi
+  requests:
+    cpu: 100m
+    memory: 128Mi
+```
+
+## Metrics Exposed
+
+Info metrics are available at the `/metrics` endpoint:
+
+- `tencentcloud_cbs_info` - CBS disk information (type, size, status, attached instance)
+- `tencentcloud_cvm_info` - CVM instance information (type, image, network configuration)
+- `tencentcloud_vpc_info` - VPC configuration and routing information
+
+These are typically **info metrics** with value 1, where the labels contain the actual information:
+
+```
+tencentcloud_cbs_info{disk_id="disk-abc123",disk_type="CLOUD_SSD",size="100",status="ATTACHED"} 1
+```
+
+## Use Cases
+
+### Inventory Tracking
+
+Track all cloud resources and their configurations:
+
+```promql
+# Count CBS disks by type
+count by (disk_type) (tencentcloud_cbs_info)
+
+# Find unattached disks
+tencentcloud_cbs_info{status="UNATTACHED"}
+```
+
+### Cost Analysis
+
+Combine with metrics for cost analysis:
+
+```promql
+# Total storage capacity by type
+sum by (disk_type) (tencentcloud_cbs_info * on(disk_id) group_right tencentcloud_cbs_size)
+```
+
+## Security Best Practices
+
+<Warning>
+  Follow these security guidelines:
+</Warning>
+
+1. **Minimal permissions** - Grant only describe/list permissions, no modify permissions
+2. **Dedicated CAM user** - Create a separate user for monitoring
+3. **Secret rotation** - Rotate API credentials regularly
+4. **Network isolation** - Use network policies to restrict access
+
+## Resources
+
+- [Tencent Cloud Info Exporter GitHub](https://github.com/LeoQuote/tencentcloud-info-exporter)
+- [Tencent Cloud API Documentation](https://www.tencentcloud.com/document/api)

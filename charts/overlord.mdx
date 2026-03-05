@@ -1,0 +1,330 @@
+---
+title: Overlord
+description: Deploy Bilibili Overlord memcached/redis cluster proxy on Kubernetes
+---
+
+The Overlord chart deploys Bilibili's Overlord, a high-performance cache proxy that supports both Memcached and Redis protocols. It provides features like connection pooling, request pipelining, and cluster management for cache systems.
+
+## What It Deploys
+
+This chart deploys:
+- Overlord web interface for management
+- Overlord API server for proxy operations
+- Overlord scheduler for cluster coordination
+- Service for HTTP traffic
+- Optional Ingress or HTTPRoute for external access
+- ConfigMap or Secret for application configuration
+
+## Installation
+
+```bash
+helm repo add douban https://douban.github.io/charts/
+helm install my-overlord douban/overlord -f values.yaml
+```
+
+## Key Configuration Parameters
+
+<ParamField path="image.repository" type="string" default="douz/overlord">
+  Overlord Docker image repository
+</ParamField>
+
+<ParamField path="image.tag" type="string" default="latest">
+  Overlord image tag
+</ParamField>
+
+<ParamField path="web.replicaCount" type="number" default="1">
+  Number of web interface replicas
+</ParamField>
+
+<ParamField path="config.apiserver" type="string" default="">
+  API server configuration (TOML format)
+</ParamField>
+
+<ParamField path="config.scheduler" type="string" default="">
+  Scheduler configuration (TOML format)
+</ParamField>
+
+<ParamField path="secretName" type="string" default="overlord">
+  Name of the secret containing configuration
+</ParamField>
+
+<ParamField path="existingSecret" type="boolean" default="false">
+  Use an existing secret instead of creating a new one
+</ParamField>
+
+<ParamField path="service.type" type="string" default="ClusterIP">
+  Kubernetes service type
+</ParamField>
+
+<ParamField path="service.port" type="number" default="80">
+  Service port for HTTP traffic
+</ParamField>
+
+<ParamField path="ingress.enabled" type="boolean" default="false">
+  Enable Ingress resource for external access
+</ParamField>
+
+<ParamField path="httpRoute.enabled" type="boolean" default="false">
+  Enable HTTPRoute resource for Gateway API routing
+</ParamField>
+
+## Example Configurations
+
+### Basic Deployment with Redis Backend
+
+```yaml
+web:
+  replicaCount: 2
+
+apiserver:
+  resources:
+    limits:
+      cpu: 1000m
+      memory: 1Gi
+    requests:
+      cpu: 500m
+      memory: 512Mi
+
+scheduler:
+  resources:
+    limits:
+      cpu: 500m
+      memory: 512Mi
+    requests:
+      cpu: 250m
+      memory: 256Mi
+
+config:
+  apiserver: |
+    [cache]
+    [cache.redis]
+    [[cache.redis.cluster]]
+    name = "redis-cluster"
+    hash_method = "fnv1a_64"
+    hash_distribution = "ketama"
+    hash_tag = ""
+    dial_timeout = 1000
+    read_timeout = 1000
+    write_timeout = 1000
+    node_connections = 2
+    ping_fail_limit = 3
+    ping_auto_eject = true
+    
+    [[cache.redis.cluster.servers]]
+    weight = 1
+    addr = "redis-node-1:6379"
+    
+    [[cache.redis.cluster.servers]]
+    weight = 1
+    addr = "redis-node-2:6379"
+    
+    [[cache.redis.cluster.servers]]
+    weight = 1
+    addr = "redis-node-3:6379"
+
+ingress:
+  enabled: true
+  className: "nginx"
+  hosts:
+    - host: overlord.example.com
+      paths:
+        - path: /
+          pathType: Prefix
+```
+
+### Memcached Cluster Configuration
+
+```yaml
+config:
+  apiserver: |
+    [cache]
+    [cache.memcache]
+    [[cache.memcache.cluster]]
+    name = "memcache-cluster"
+    hash_method = "fnv1a_64"
+    hash_distribution = "ketama"
+    dial_timeout = 1000
+    read_timeout = 1000
+    write_timeout = 1000
+    node_connections = 2
+    
+    [[cache.memcache.cluster.servers]]
+    weight = 1
+    addr = "memcached-1:11211"
+    
+    [[cache.memcache.cluster.servers]]
+    weight = 1
+    addr = "memcached-2:11211"
+    
+    [[cache.memcache.cluster.servers]]
+    weight = 1
+    addr = "memcached-3:11211"
+```
+
+### Using Existing Secret for Configuration
+
+```yaml
+existingSecret: true
+secretName: my-overlord-config
+```
+
+Create the secret:
+
+```bash
+kubectl create secret generic my-overlord-config \
+  --from-file=apiserver.toml=./apiserver.toml \
+  --from-file=scheduler.toml=./scheduler.toml
+```
+
+### With Gateway API HTTPRoute
+
+```yaml
+httpRoute:
+  enabled: true
+  gatewayRef:
+    name: envoy-gateway-bundle
+    namespace: envoy-gateway-system
+  reuseIngressConfiguration: true
+```
+
+<Accordion title="Advanced Scheduler Configuration">
+
+### Scheduler Settings
+
+```yaml
+config:
+  scheduler: |
+    [scheduler]
+    interval = 60
+    
+    [scheduler.cluster]
+    name = "main-cluster"
+    
+    [scheduler.storage]
+    type = "etcd"
+    endpoints = [
+      "etcd-1:2379",
+      "etcd-2:2379",
+      "etcd-3:2379"
+    ]
+    dial_timeout = 5000
+    request_timeout = 2000
+```
+
+</Accordion>
+
+<Accordion title="Multi-Cluster Setup">
+
+### Multiple Cache Clusters
+
+```yaml
+config:
+  apiserver: |
+    [cache]
+    
+    # Redis Cluster
+    [cache.redis]
+    [[cache.redis.cluster]]
+    name = "redis-main"
+    hash_method = "fnv1a_64"
+    hash_distribution = "ketama"
+    dial_timeout = 1000
+    read_timeout = 1000
+    write_timeout = 1000
+    node_connections = 4
+    
+    [[cache.redis.cluster.servers]]
+    weight = 1
+    addr = "redis-1:6379"
+    
+    [[cache.redis.cluster.servers]]
+    weight = 1
+    addr = "redis-2:6379"
+    
+    # Memcached Cluster
+    [cache.memcache]
+    [[cache.memcache.cluster]]
+    name = "memcache-session"
+    hash_method = "fnv1a_64"
+    hash_distribution = "ketama"
+    dial_timeout = 1000
+    read_timeout = 1000
+    write_timeout = 1000
+    node_connections = 2
+    
+    [[cache.memcache.cluster.servers]]
+    weight = 1
+    addr = "memcached-1:11211"
+    
+    [[cache.memcache.cluster.servers]]
+    weight = 1
+    addr = "memcached-2:11211"
+```
+
+</Accordion>
+
+<Accordion title="Custom Routing Rules">
+
+### HTTPRoute with Custom Paths
+
+```yaml
+httpRoute:
+  enabled: true
+  reuseIngressConfiguration: false
+  gatewayRef:
+    name: envoy-gateway-bundle
+    namespace: envoy-gateway-system
+  hostnames:
+    - overlord.example.com
+  extraPaths:
+    - matches:
+        - path:
+            type: PathPrefix
+            value: /api/v2
+      backendRefs:
+        - name: overlord-apiserver
+          port: 8080
+```
+
+</Accordion>
+
+## Resource Recommendations
+
+### Production Resource Limits
+
+```yaml
+web:
+  replicaCount: 2
+
+apiserver:
+  resources:
+    limits:
+      cpu: 2000m
+      memory: 2Gi
+    requests:
+      cpu: 1000m
+      memory: 1Gi
+
+scheduler:
+  resources:
+    limits:
+      cpu: 1000m
+      memory: 1Gi
+    requests:
+      cpu: 500m
+      memory: 512Mi
+
+resources:
+  limits:
+    cpu: 500m
+    memory: 512Mi
+  requests:
+    cpu: 250m
+    memory: 256Mi
+```
+
+## Links
+
+- [Overlord GitHub Repository](https://github.com/bilibili/overlord)
+- Maintainer: sysadmin@douban.com
+- [Chart Source](https://github.com/douban/charts)

@@ -1,0 +1,190 @@
+---
+title: Prometheus Memcached Exporter
+description: Export Memcached metrics to Prometheus
+---
+
+The Prometheus Memcached Exporter chart deploys the official Prometheus exporter for [Memcached](https://memcached.org/), providing detailed cache performance and statistics metrics.
+
+## What It Monitors
+
+This exporter collects comprehensive Memcached metrics including:
+
+- Cache hit/miss ratios
+- Memory usage and evictions
+- Connection statistics
+- Item counts and sizes
+- Operations per second
+- Network traffic
+
+## Installation
+
+### Basic Installation
+
+```bash
+helm repo add douban https://douban.github.io/charts
+helm install memcached-exporter douban/prometheus-memcached-exporter \
+  --set memcached.address="mymemcached:11211"
+```
+
+### Configuration
+
+<ParamField path="memcached.address" type="string" default="mymc:8881" required>
+  The address of the Memcached server to monitor (host:port format)
+</ParamField>
+
+<ParamField path="argumentsOverride" type="array" default="[]">
+  Override the default exporter arguments completely. Use this for advanced configuration.
+</ParamField>
+
+<ParamField path="image.repository" type="string" default="prom/memcached-exporter">
+  Container image repository
+</ParamField>
+
+<ParamField path="image.tag" type="string" default="v0.9.0">
+  Container image tag
+</ParamField>
+
+<ParamField path="service.port" type="number" default="9150">
+  Port to expose metrics on (standard Memcached exporter port)
+</ParamField>
+
+## ServiceMonitor Configuration
+
+To enable automatic Prometheus scraping via the Prometheus Operator:
+
+```yaml
+serviceMonitor:
+  enabled: true
+  interval: 30s
+  labels:
+    prometheus: kube-prometheus
+```
+
+<ParamField path="serviceMonitor.enabled" type="boolean" default="false">
+  Enable ServiceMonitor resource creation
+</ParamField>
+
+<ParamField path="serviceMonitor.interval" type="string" default="30s">
+  How frequently Prometheus should scrape
+</ParamField>
+
+<ParamField path="serviceMonitor.telemetryPath" type="string" default="/metrics">
+  Path to scrape metrics from
+</ParamField>
+
+## Manual Prometheus Configuration
+
+If not using the Prometheus Operator, add this scrape config:
+
+```yaml
+scrape_configs:
+  - job_name: 'memcached-exporter'
+    static_configs:
+      - targets: ['memcached-exporter:9150']
+    scrape_interval: 30s
+```
+
+## Advanced Configuration
+
+### Custom Volumes
+
+You can mount custom configurations:
+
+```yaml
+volumes:
+  - name: custom-config
+    configMap:
+      name: memcached-exporter-config
+
+volumeMounts:
+  - mountPath: /etc/memcached-exporter
+    name: custom-config
+```
+
+### Override Arguments
+
+For complete control over exporter arguments:
+
+```yaml
+argumentsOverride:
+  - "--memcached.address=memcached:11211"
+  - "--web.listen-address=:9150"
+  - "--memcached.timeout=1s"
+```
+
+## Prometheus Rules
+
+Example alerting rules:
+
+```yaml
+prometheusRule:
+  enabled: true
+  rules:
+    - alert: MemcachedDown
+      expr: memcached_up == 0
+      for: 2m
+      labels:
+        severity: critical
+      annotations:
+        summary: Memcached instance down
+        description: "Memcached instance {{ $labels.instance }} is unreachable"
+    
+    - alert: MemcachedHighEvictionRate
+      expr: rate(memcached_items_evicted_total[5m]) > 10
+      for: 5m
+      labels:
+        severity: warning
+      annotations:
+        summary: High eviction rate in Memcached
+        description: "Memcached is evicting {{ $value }} items/sec"
+```
+
+## Example Values
+
+```yaml
+replicaCount: 1
+
+memcached:
+  address: "memcached.default.svc.cluster.local:11211"
+
+image:
+  repository: prom/memcached-exporter
+  tag: "v0.9.0"
+  pullPolicy: IfNotPresent
+
+service:
+  type: ClusterIP
+  port: 9150
+
+serviceMonitor:
+  enabled: true
+  interval: 15s
+  labels:
+    release: prometheus
+
+resources:
+  limits:
+    cpu: 100m
+    memory: 64Mi
+  requests:
+    cpu: 50m
+    memory: 32Mi
+```
+
+## Metrics Exposed
+
+Key metrics available at the `/metrics` endpoint:
+
+- `memcached_up` - Whether the Memcached server is up
+- `memcached_current_bytes` - Current bytes used
+- `memcached_current_items` - Current item count
+- `memcached_current_connections` - Current open connections
+- `memcached_commands_total` - Total commands processed (get, set, etc.)
+- `memcached_items_evicted_total` - Total evicted items
+- `memcached_hits_total` - Total cache hits
+- `memcached_misses_total` - Total cache misses
+
+## Resources
+
+- [Memcached Exporter GitHub](https://github.com/prometheus/memcached_exporter)
+- [Memcached Documentation](https://memcached.org/)

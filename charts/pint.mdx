@@ -1,0 +1,367 @@
+---
+title: Pint
+description: Prometheus rule linter and validator
+---
+
+Pint is a linter and validator for Prometheus rules that helps maintain rule quality and catch errors early.
+
+## Overview
+
+Pint analyzes Prometheus recording and alerting rules to detect problems, enforce best practices, and ensure rules are valid before deployment. It can watch ConfigMaps for changes and provide a web UI for validation results.
+
+**Upstream project**: [https://github.com/cloudflare/pint](https://github.com/cloudflare/pint)
+
+## Installation
+
+```bash
+helm repo add douban https://douban.github.io/charts/
+helm repo update
+helm install pint douban/pint
+```
+
+## Configuration
+
+### Basic Configuration
+
+```yaml
+image:
+  repository: ghcr.io/cloudflare/pint
+  tag: "0.43.1"
+  pullPolicy: IfNotPresent
+
+replicaCount: 1
+
+service:
+  type: ClusterIP
+  port: 8008
+
+containerPort: 8008
+```
+
+### Pint Configuration
+
+Configure pint behavior via HCL configuration:
+
+```yaml
+configMap:
+  data:
+    pint.hcl: |
+      parser {
+        relaxed = ["(.*)"]
+      }
+      
+      prometheus "prod" {
+        uri     = "http://prometheus:9090"
+        timeout = "30s"
+      }
+      
+      rule {
+        match {
+          kind = "alerting"
+        }
+        annotation "summary" {
+          required = true
+        }
+        annotation "description" {
+          required = true
+        }
+      }
+```
+
+### Watch Prometheus Rules
+
+Configure which ConfigMap contains Prometheus rules to watch:
+
+```yaml
+watchConfig: prometheus-rules
+```
+
+### Advanced Pint Configuration
+
+```yaml
+configMap:
+  data:
+    pint.hcl: |
+      parser {
+        relaxed = ["(.*)"]
+      }
+      
+      # Multiple Prometheus instances
+      prometheus "production" {
+        uri      = "http://prometheus-prod:9090"
+        timeout  = "30s"
+        required = true
+      }
+      
+      prometheus "staging" {
+        uri     = "http://prometheus-staging:9090"
+        timeout = "30s"
+      }
+      
+      # Rule requirements
+      rule {
+        match {
+          kind = "alerting"
+        }
+        
+        # Required annotations
+        annotation "summary" {
+          required = true
+        }
+        annotation "description" {
+          required = true
+        }
+        annotation "runbook_url" {
+          required = true
+        }
+        
+        # Required labels
+        label "severity" {
+          required = true
+          value    = "(critical|warning|info)"
+        }
+      }
+      
+      # Recording rule requirements  
+      rule {
+        match {
+          kind = "recording"
+        }
+        aggregate "(.*):(.*)" {
+          keep = ["job", "instance"]
+        }
+      }
+```
+
+## Monitoring
+
+### ServiceMonitor (Prometheus)
+
+```yaml
+serviceMonitor:
+  enabled: true
+  namespace: monitoring
+  interval: 30s
+  labels:
+    prometheus: kube-prometheus
+```
+
+### PrometheusRule
+
+```yaml
+prometheusRule:
+  enabled: true
+  namespace: monitoring
+  additionalLabels:
+    prometheus: kube-prometheus
+  rules:
+    - alert: PintValidationFailures
+      expr: pint_validation_errors_total > 0
+      for: 5m
+      labels:
+        severity: warning
+      annotations:
+        summary: "Pint validation errors detected"
+        description: "{{ $value }} validation errors in Prometheus rules"
+```
+
+## Access Configuration
+
+### Ingress
+
+```yaml
+ingress:
+  enabled: true
+  className: "nginx"
+  annotations:
+    cert-manager.io/cluster-issuer: "letsencrypt"
+  hosts:
+    - host: pint.example.com
+      paths:
+        - path: /
+          pathType: ImplementationSpecific
+  tls:
+    - secretName: pint-tls
+      hosts:
+        - pint.example.com
+```
+
+## Example Values
+
+### Basic Setup
+
+```yaml
+image:
+  repository: ghcr.io/cloudflare/pint
+  tag: "0.43.1"
+
+replicaCount: 1
+
+watchConfig: prometheus-rulefiles
+
+configMap:
+  data:
+    pint.hcl: |
+      parser {
+        relaxed = ["(.*)"]
+      }
+      
+      prometheus "default" {
+        uri = "http://prometheus:9090"
+        timeout = "30s"
+      }
+
+service:
+  type: ClusterIP
+  port: 8008
+
+ingress:
+  enabled: true
+  className: "nginx"
+  hosts:
+    - host: pint.example.com
+      paths:
+        - path: /
+          pathType: ImplementationSpecific
+```
+
+### Production Setup with Monitoring
+
+```yaml
+image:
+  repository: ghcr.io/cloudflare/pint
+  tag: "0.43.1"
+  pullPolicy: IfNotPresent
+
+replicaCount: 1
+
+watchConfig: prometheus-rules
+
+configMap:
+  data:
+    pint.hcl: |
+      parser {
+        relaxed = ["(.*)"]
+      }
+      
+      prometheus "production" {
+        uri      = "http://prometheus-prod.monitoring:9090"
+        timeout  = "60s"
+        required = true
+      }
+      
+      rule {
+        match {
+          kind = "alerting"
+        }
+        
+        annotation "summary" {
+          required = true
+        }
+        annotation "description" {
+          required = true
+        }
+        annotation "runbook_url" {
+          required = true
+        }
+        annotation "dashboard_url" {
+          required = false
+        }
+        
+        label "severity" {
+          required = true
+          value    = "^(critical|warning|info)$"
+        }
+        label "team" {
+          required = true
+        }
+      }
+      
+      rule {
+        match {
+          kind = "recording"
+        }
+        aggregate "(.*)" {
+          keep = ["job"]
+        }
+      }
+
+service:
+  type: ClusterIP
+  port: 8008
+
+ingress:
+  enabled: true
+  className: "nginx"
+  annotations:
+    cert-manager.io/cluster-issuer: "letsencrypt-prod"
+  hosts:
+    - host: pint.monitoring.example.com
+      paths:
+        - path: /
+          pathType: Prefix
+  tls:
+    - secretName: pint-tls
+      hosts:
+        - pint.monitoring.example.com
+
+serviceMonitor:
+  enabled: true
+  namespace: monitoring
+  interval: 30s
+  labels:
+    prometheus: kube-prometheus
+
+prometheusRule:
+  enabled: true
+  namespace: monitoring
+  additionalLabels:
+    prometheus: kube-prometheus
+  rules:
+    - alert: PintValidationErrors
+      expr: pint_validation_errors_total > 0
+      for: 10m
+      labels:
+        severity: warning
+      annotations:
+        summary: "Pint found validation errors"
+        description: "{{ $value }} errors in Prometheus rules"
+
+resources:
+  limits:
+    cpu: 500m
+    memory: 512Mi
+  requests:
+    cpu: 100m
+    memory: 128Mi
+```
+
+## Key Parameters
+
+| Parameter | Description | Default |
+|-----------|-------------|----------|
+| `image.repository` | Pint image | `ghcr.io/cloudflare/pint` |
+| `image.tag` | Image tag | `0.43.1` |
+| `containerPort` | Container port | `8008` |
+| `watchConfig` | ConfigMap name to watch | `prometheus-rulefiles` |
+| `serviceMonitor.enabled` | Enable ServiceMonitor | `false` |
+| `prometheusRule.enabled` | Enable PrometheusRule | `false` |
+
+## Pint Checks
+
+Pint performs various checks on Prometheus rules:
+
+- **Syntax validation** - Ensures PromQL is valid
+- **Query analysis** - Detects inefficient queries
+- **Label validation** - Checks required labels exist
+- **Annotation validation** - Ensures annotations are present
+- **Comparison checks** - Validates against live Prometheus
+- **Rate checks** - Ensures proper use of rate()
+- **Template validation** - Checks alert templates
+
+## Requirements
+
+- Kubernetes 1.16+
+- Helm 3+
+- Prometheus instance (for validation checks)
+- ConfigMap containing Prometheus rules

@@ -1,0 +1,303 @@
+---
+title: Archery
+description: SQL audit platform for MySQL with goInception integration
+---
+
+Archery is a SQL audit platform that integrates query auditing, execution, backup, and rollback statement generation for MySQL databases.
+
+## Overview
+
+Archery provides a web-based interface for managing MySQL database operations with built-in SQL auditing capabilities powered by goInception. It helps DBAs maintain SQL quality and track database changes.
+
+**Upstream project**: [https://github.com/hhyo/Archery](https://github.com/hhyo/Archery)
+
+## Installation
+
+<Steps>
+  <Step title="Add the Helm repository">
+    ```bash
+    helm repo add douban https://douban.github.io/charts/
+    helm repo update
+    ```
+  </Step>
+
+  <Step title="Install the chart">
+    ```bash
+    helm install archery douban/archery
+    ```
+  </Step>
+</Steps>
+
+## Dependencies
+
+Archery requires several services to function:
+
+- **Redis** - For caching and message queuing (embedded by default)
+- **MySQL** - For application database storage (embedded by default)
+- **goInception** - For SQL audit and review (embedded by default)
+
+All dependencies can be provided as embedded services or connected to external instances.
+
+## Configuration
+
+### Basic Configuration
+
+```yaml
+image:
+  repository: hhyo/archery
+  tag: v1.9.1
+
+ingress:
+  enabled: true
+  className: nginx
+  hosts:
+    - archery.example.com
+
+# Required for CSRF protection
+envs:
+  - name: CSRF_TRUSTED_ORIGINS
+    value: "https://archery.example.com,http://archery.example.com"
+```
+
+### Database Configuration
+
+#### Using Embedded MySQL (Default)
+
+```yaml
+mysql:
+  embedded: true
+  auth:
+    database: archery
+    rootPassword: "MYSQL_ROOT_PASSWORD"
+  primary:
+    persistence:
+      enabled: true
+      size: 20Gi
+```
+
+#### Using External MySQL
+
+```yaml
+mysql:
+  embedded: false
+  url: "mysql://user:password@mysql-host:3306/archery"
+  # Or use a secret
+  # urlSecret: "archery-db-secret"
+  # urlSecretKey: "DATABASE_URL"
+```
+
+### Redis Configuration
+
+#### Using Embedded Redis (Default)
+
+```yaml
+redis:
+  embedded: true
+  auth:
+    password: "REDIS_PASSWORD"
+  master:
+    persistence:
+      enabled: false
+      size: 8Gi
+```
+
+#### Using External Redis
+
+```yaml
+redis:
+  embedded: false
+  url: "redis://password@redis-host:6379/0"
+  dingdingUrl: "redis://password@redis-host:6379/1"
+```
+
+### goInception Configuration
+
+goInception provides SQL audit functionality:
+
+```yaml
+goinception:
+  embedded: true
+  image:
+    repository: hanchuanchuan/goinception
+    tag: latest
+  initEnv:
+    - name: BACKUP_HOST
+      value: "backup-mysql-host"
+    - name: BACKUP_PORT
+      value: "3306"
+    - name: BACKUP_USER
+      value: "backup_user"
+    - name: BACKUP_PASSWORD
+      value: "backup_password"
+```
+
+### Admin User Configuration
+
+Set initial superuser credentials:
+
+```yaml
+configMap:
+  enabled: true
+  superuser:
+    username: admin
+    password: archery  # Change this!
+    email: "admin@example.com"
+```
+
+### Advanced Settings
+
+Customize Archery behavior via `local_settings.py`:
+
+```yaml
+configMap:
+  data:
+    local_settings.py: |-
+      # -*- coding: UTF-8 -*-
+      SECRET_KEY = "your-secret-key"
+      ENABLE_LDAP = True
+      # Add more settings...
+```
+
+## Access Configuration
+
+### Ingress
+
+```yaml
+ingress:
+  enabled: true
+  className: "nginx"
+  annotations:
+    cert-manager.io/cluster-issuer: "letsencrypt"
+  hosts:
+    - dba.archery.local
+  tls:
+    - secretName: archery-tls
+      hosts:
+        - dba.archery.local
+```
+
+### Service
+
+```yaml
+service:
+  type: ClusterIP
+  port: 9123
+  targetPort: 9123
+```
+
+## Example Values
+
+### Minimal Production Setup
+
+```yaml
+image:
+  tag: v1.9.1
+
+ingress:
+  enabled: true
+  className: nginx
+  hosts:
+    - archery.my-domain.com
+
+envs:
+  - name: CSRF_TRUSTED_ORIGINS
+    value: "https://archery.my-domain.com,http://archery.my-domain.com"
+
+mysql:
+  embedded: true
+  primary:
+    persistence:
+      enabled: true
+      size: 50Gi
+
+redis:
+  embedded: true
+  master:
+    persistence:
+      enabled: true
+      size: 10Gi
+
+goinception:
+  embedded: true
+
+configMap:
+  superuser:
+    username: admin
+    password: "change-me-immediately"
+    email: "dba@my-domain.com"
+```
+
+### Using External Services
+
+```yaml
+image:
+  tag: v1.9.1
+
+ingress:
+  enabled: true
+  className: nginx
+  hosts:
+    - archery.my-domain.com
+
+envs:
+  - name: CSRF_TRUSTED_ORIGINS
+    value: "https://archery.my-domain.com"
+  - name: SECRET_KEY
+    valueFrom:
+      secretKeyRef:
+        name: archery-secrets
+        key: SECRET_KEY
+
+mysql:
+  embedded: false
+  urlSecret: "archery-db"
+  urlSecretKey: "DATABASE_URL"
+
+redis:
+  embedded: false
+  urlSecret: "archery-redis"
+  urlSecretKey: "CACHE_URL"
+
+goinception:
+  embedded: false
+  # Configure external goInception endpoint
+```
+
+## Configuration Priority
+
+Settings are applied in the following order (highest priority last):
+
+1. Default values from dependencies (MySQL, Redis, goInception)
+2. Container environment variables (configured via `envs`)
+3. Custom `local_settings.py` (configured via `configMap.data`)
+
+## Resources
+
+```yaml
+resources:
+  limits:
+    cpu: 1000m
+    memory: 2Gi
+  requests:
+    cpu: 500m
+    memory: 1Gi
+```
+
+## Key Parameters
+
+| Parameter | Description | Default |
+|-----------|-------------|----------|
+| `image.repository` | Archery image repository | `hhyo/archery` |
+| `image.tag` | Archery image tag | `v1.9.1` |
+| `service.port` | Service port | `9123` |
+| `redis.embedded` | Use embedded Redis | `true` |
+| `mysql.embedded` | Use embedded MySQL | `true` |
+| `goinception.embedded` | Use embedded goInception | `true` |
+| `configMap.superuser.username` | Admin username | `admin` |
+| `configMap.superuser.password` | Admin password | `archery` |
+
+## Requirements
+
+- Kubernetes 1.16+
+- Helm 3+
+- PersistentVolume provisioner support (for embedded MySQL)

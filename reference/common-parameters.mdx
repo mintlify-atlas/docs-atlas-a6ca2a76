@@ -1,0 +1,693 @@
+---
+title: Common Parameters
+description: Standard configuration parameters used across all charts
+---
+
+This page documents the common parameters that are standardized across all charts in this repository. These parameters follow Helm best practices and provide consistent configuration patterns.
+
+## Image Configuration
+
+All charts use a standardized image configuration structure.
+
+<ParamField path="image.repository" type="string" required>
+  Container image repository. Specifies where to pull the Docker image from.
+  
+  **Example**: `nginx`, `ghcr.io/prymitive/karma`, `prom/memcached-exporter`
+</ParamField>
+
+<ParamField path="image.tag" type="string" default="">
+  Image tag to use. If not specified, defaults to the chart's `appVersion`.
+  
+  **Example**: `"1.16.0"`, `"v0.85"`, `"latest"`
+  
+  <Note>
+    Using an empty string allows the image tag to automatically track the chart's `appVersion`, making upgrades easier.
+  </Note>
+</ParamField>
+
+<ParamField path="image.pullPolicy" type="string" default="IfNotPresent">
+  Image pull policy for the container.
+  
+  **Options**:
+  - `IfNotPresent`: Pull only if the image isn't already present
+  - `Always`: Always pull the latest version
+  - `Never`: Never pull, use local image only
+</ParamField>
+
+<ParamField path="imagePullSecrets" type="array" default="[]">
+  List of secret names to use for pulling private images.
+  
+  **Example**:
+  ```yaml
+  imagePullSecrets:
+    - name: myregistrykey
+    - name: anotherkey
+  ```
+</ParamField>
+
+### Example Image Configuration
+
+```yaml
+image:
+  repository: nginx
+  pullPolicy: IfNotPresent
+  tag: "1.21.0"
+
+imagePullSecrets:
+  - name: docker-registry-secret
+```
+
+## Replica and Scaling Configuration
+
+<ParamField path="replicaCount" type="integer" default="1">
+  Number of pod replicas to run. Only applies when autoscaling is disabled.
+  
+  **Example**: `1`, `3`, `5`
+</ParamField>
+
+<ParamField path="autoscaling.enabled" type="boolean" default="false">
+  Enable horizontal pod autoscaling.
+</ParamField>
+
+<ParamField path="autoscaling.minReplicas" type="integer" default="1">
+  Minimum number of replicas for autoscaling.
+</ParamField>
+
+<ParamField path="autoscaling.maxReplicas" type="integer" default="100">
+  Maximum number of replicas for autoscaling.
+</ParamField>
+
+<ParamField path="autoscaling.targetCPUUtilizationPercentage" type="integer" default="80">
+  Target CPU utilization percentage for autoscaling.
+</ParamField>
+
+<ParamField path="autoscaling.targetMemoryUtilizationPercentage" type="integer">
+  Target memory utilization percentage for autoscaling (optional).
+</ParamField>
+
+### Example Autoscaling Configuration
+
+```yaml
+replicaCount: 3  # Used only when autoscaling.enabled is false
+
+autoscaling:
+  enabled: true
+  minReplicas: 2
+  maxReplicas: 10
+  targetCPUUtilizationPercentage: 75
+  targetMemoryUtilizationPercentage: 80
+```
+
+## Service Configuration
+
+<ParamField path="service.type" type="string" default="ClusterIP">
+  Kubernetes Service type.
+  
+  **Options**:
+  - `ClusterIP`: Internal cluster IP (default)
+  - `NodePort`: Expose on each node's IP at a static port
+  - `LoadBalancer`: External load balancer (cloud provider)
+  - `ExternalName`: Map to an external DNS name
+</ParamField>
+
+<ParamField path="service.port" type="integer" default="80">
+  Service port to expose.
+  
+  **Example**: `80`, `8080`, `3000`
+</ParamField>
+
+<ParamField path="service.annotations" type="object" default="{}">
+  Annotations to add to the Service resource.
+  
+  **Example**:
+  ```yaml
+  service:
+    annotations:
+      prometheus.io/scrape: "true"
+      prometheus.io/port: "9150"
+  ```
+</ParamField>
+
+<ParamField path="service.labels" type="object" default="{}">
+  Additional labels to add to the Service.
+</ParamField>
+
+<ParamField path="containerPort" type="integer" default="80">
+  Container port that the application listens on.
+  
+  **Example**: `80`, `8080`, `3000`, `5001`
+</ParamField>
+
+### Example Service Configuration
+
+```yaml
+service:
+  type: LoadBalancer
+  port: 80
+  annotations:
+    service.beta.kubernetes.io/aws-load-balancer-type: "nlb"
+  labels:
+    monitoring: "enabled"
+
+containerPort: 8080
+```
+
+## Ingress Configuration
+
+<ParamField path="ingress.enabled" type="boolean" default="false">
+  Enable Ingress resource creation.
+</ParamField>
+
+<ParamField path="ingress.className" type="string" default="">
+  IngressClass name to use (Kubernetes 1.18+).
+  
+  **Example**: `nginx`, `traefik`, `alb`
+</ParamField>
+
+<ParamField path="ingress.annotations" type="object" default="{}">
+  Annotations for the Ingress resource.
+  
+  **Example**:
+  ```yaml
+  ingress:
+    annotations:
+      kubernetes.io/ingress.class: nginx
+      cert-manager.io/cluster-issuer: letsencrypt-prod
+      nginx.ingress.kubernetes.io/ssl-redirect: "true"
+  ```
+</ParamField>
+
+<ParamField path="ingress.hosts" type="array">
+  List of hosts and paths for the Ingress.
+  
+  **Structure**:
+  ```yaml
+  hosts:
+    - host: example.com
+      paths:
+        - path: /
+          pathType: ImplementationSpecific
+  ```
+</ParamField>
+
+<ParamField path="ingress.tls" type="array" default="[]">
+  TLS configuration for the Ingress.
+  
+  **Example**:
+  ```yaml
+  tls:
+    - secretName: example-tls
+      hosts:
+        - example.com
+  ```
+</ParamField>
+
+### Example Ingress Configuration
+
+```yaml
+ingress:
+  enabled: true
+  className: nginx
+  annotations:
+    cert-manager.io/cluster-issuer: letsencrypt-prod
+    nginx.ingress.kubernetes.io/force-ssl-redirect: "true"
+  hosts:
+    - host: myapp.example.com
+      paths:
+        - path: /
+          pathType: Prefix
+  tls:
+    - secretName: myapp-tls
+      hosts:
+        - myapp.example.com
+```
+
+## HTTPRoute Configuration (Gateway API)
+
+Many charts support the Gateway API HTTPRoute as an alternative to Ingress.
+
+<ParamField path="httpRoute.enabled" type="boolean" default="false">
+  Enable Gateway API HTTPRoute creation.
+</ParamField>
+
+<ParamField path="httpRoute.gatewayRef.name" type="string" default="envoy-gateway-bundle">
+  Name of the Gateway to attach to.
+</ParamField>
+
+<ParamField path="httpRoute.gatewayRef.namespace" type="string" default="envoy-gateway-system">
+  Namespace of the Gateway.
+</ParamField>
+
+<ParamField path="httpRoute.reuseIngressConfiguration" type="boolean" default="true">
+  Reuse hostnames from the Ingress configuration.
+</ParamField>
+
+<ParamField path="httpRoute.hostnames" type="array" default="[]">
+  Hostnames for the HTTPRoute (used when `reuseIngressConfiguration` is false).
+</ParamField>
+
+<ParamField path="httpRoute.extraPaths" type="array" default="[]">
+  Additional HTTPRoute rules.
+  
+  **Example**:
+  ```yaml
+  extraPaths:
+    - matches:
+        - path:
+            type: PathPrefix
+            value: /api
+      backendRefs:
+        - name: api-service
+          port: 8080
+  ```
+</ParamField>
+
+### Example HTTPRoute Configuration
+
+```yaml
+httpRoute:
+  enabled: true
+  gatewayRef:
+    name: my-gateway
+    namespace: gateway-system
+  reuseIngressConfiguration: false
+  hostnames:
+    - myapp.example.com
+  extraPaths:
+    - matches:
+        - path:
+            type: PathPrefix
+            value: /admin
+      backendRefs:
+        - name: admin-backend
+          port: 9090
+```
+
+## Resource Limits and Requests
+
+<ParamField path="resources" type="object" default="{}">
+  CPU and memory resource requests and limits.
+  
+  **Example**:
+  ```yaml
+  resources:
+    limits:
+      cpu: 500m
+      memory: 512Mi
+    requests:
+      cpu: 250m
+      memory: 256Mi
+  ```
+  
+  <Warning>
+    By default, resources are set to `{}` to allow charts to run in resource-constrained environments. Always set appropriate limits for production deployments.
+  </Warning>
+</ParamField>
+
+### Resource Configuration Best Practices
+
+```yaml
+resources:
+  # Set limits to prevent resource exhaustion
+  limits:
+    cpu: 1000m      # 1 CPU core
+    memory: 1Gi     # 1 GiB of memory
+  # Requests ensure guaranteed resources
+  requests:
+    cpu: 100m       # 0.1 CPU cores
+    memory: 128Mi   # 128 MiB of memory
+```
+
+## Scheduling Configuration
+
+<ParamField path="nodeSelector" type="object" default="{}">
+  Node labels for pod assignment.
+  
+  **Example**:
+  ```yaml
+  nodeSelector:
+    disktype: ssd
+    kubernetes.io/arch: amd64
+  ```
+</ParamField>
+
+<ParamField path="tolerations" type="array" default="[]">
+  Tolerations for pod assignment.
+  
+  **Example**:
+  ```yaml
+  tolerations:
+    - key: "key1"
+      operator: "Equal"
+      value: "value1"
+      effect: "NoSchedule"
+    - key: "dedicated"
+      operator: "Exists"
+      effect: "NoExecute"
+  ```
+</ParamField>
+
+<ParamField path="affinity" type="object" default="{}">
+  Affinity rules for pod assignment.
+  
+  **Example**:
+  ```yaml
+  affinity:
+    nodeAffinity:
+      requiredDuringSchedulingIgnoredDuringExecution:
+        nodeSelectorTerms:
+          - matchExpressions:
+              - key: kubernetes.io/hostname
+                operator: In
+                values:
+                  - node1
+                  - node2
+    podAntiAffinity:
+      preferredDuringSchedulingIgnoredDuringExecution:
+        - weight: 100
+          podAffinityTerm:
+            labelSelector:
+              matchExpressions:
+                - key: app
+                  operator: In
+                  values:
+                    - myapp
+            topologyKey: kubernetes.io/hostname
+  ```
+</ParamField>
+
+### Example Scheduling Configuration
+
+```yaml
+nodeSelector:
+  disktype: ssd
+  environment: production
+
+tolerations:
+  - key: "dedicated"
+    operator: "Equal"
+    value: "production"
+    effect: "NoSchedule"
+
+affinity:
+  podAntiAffinity:
+    preferredDuringSchedulingIgnoredDuringExecution:
+      - weight: 100
+        podAffinityTerm:
+          labelSelector:
+            matchLabels:
+              app: nginx
+          topologyKey: kubernetes.io/hostname
+```
+
+## ServiceAccount Configuration
+
+<ParamField path="serviceAccount.create" type="boolean" default="true">
+  Specifies whether a ServiceAccount should be created.
+</ParamField>
+
+<ParamField path="serviceAccount.annotations" type="object" default="{}">
+  Annotations to add to the ServiceAccount.
+  
+  **Example**:
+  ```yaml
+  serviceAccount:
+    annotations:
+      eks.amazonaws.com/role-arn: arn:aws:iam::123456789012:role/my-role
+  ```
+</ParamField>
+
+<ParamField path="serviceAccount.name" type="string" default="">
+  The name of the ServiceAccount to use. If not set and `create` is true, a name is generated using the fullname template.
+</ParamField>
+
+### Example ServiceAccount Configuration
+
+```yaml
+serviceAccount:
+  create: true
+  annotations:
+    eks.amazonaws.com/role-arn: arn:aws:iam::123456789012:role/my-app-role
+  name: my-custom-sa
+```
+
+## Security Context
+
+<ParamField path="podSecurityContext" type="object" default="{}">
+  Security context for the pod.
+  
+  **Example**:
+  ```yaml
+  podSecurityContext:
+    runAsNonRoot: true
+    runAsUser: 1000
+    fsGroup: 2000
+  ```
+</ParamField>
+
+<ParamField path="securityContext" type="object" default="{}">
+  Security context for the container.
+  
+  **Example**:
+  ```yaml
+  securityContext:
+    capabilities:
+      drop:
+        - ALL
+    readOnlyRootFilesystem: true
+    runAsNonRoot: true
+    runAsUser: 1000
+  ```
+</ParamField>
+
+### Example Security Configuration
+
+```yaml
+podSecurityContext:
+  runAsNonRoot: true
+  runAsUser: 1000
+  fsGroup: 2000
+  seccompProfile:
+    type: RuntimeDefault
+
+securityContext:
+  allowPrivilegeEscalation: false
+  capabilities:
+    drop:
+      - ALL
+  readOnlyRootFilesystem: true
+```
+
+## Pod Annotations and Labels
+
+<ParamField path="podAnnotations" type="object" default="{}">
+  Annotations to add to pods.
+  
+  **Example**:
+  ```yaml
+  podAnnotations:
+    prometheus.io/scrape: "true"
+    prometheus.io/port: "9090"
+  ```
+</ParamField>
+
+<ParamField path="podLabels" type="object" default="{}">
+  Additional labels to add to pods.
+  
+  **Example**:
+  ```yaml
+  podLabels:
+    environment: production
+    team: platform
+  ```
+</ParamField>
+
+## Environment Variables
+
+<ParamField path="env" type="array" default="[]">
+  Environment variables to add to the container.
+  
+  **Example**:
+  ```yaml
+  env:
+    - name: LOG_LEVEL
+      value: "info"
+    - name: DATABASE_PASSWORD
+      valueFrom:
+        secretKeyRef:
+          name: db-secret
+          key: password
+  ```
+</ParamField>
+
+## Volumes and Volume Mounts
+
+<ParamField path="volumes" type="array" default="[]">
+  Additional volumes to add to the pod.
+  
+  **Example**:
+  ```yaml
+  volumes:
+    - name: config
+      configMap:
+        name: my-config
+    - name: data
+      persistentVolumeClaim:
+        claimName: my-pvc
+  ```
+</ParamField>
+
+<ParamField path="volumeMounts" type="array" default="[]">
+  Additional volume mounts to add to the container.
+  
+  **Example**:
+  ```yaml
+  volumeMounts:
+    - name: config
+      mountPath: /etc/config
+      readOnly: true
+    - name: data
+      mountPath: /data
+  ```
+</ParamField>
+
+### Example Volume Configuration
+
+```yaml
+volumes:
+  - name: config
+    configMap:
+      name: app-config
+  - name: cache
+    emptyDir: {}
+  - name: persistent-storage
+    persistentVolumeClaim:
+      claimName: app-pvc
+
+volumeMounts:
+  - name: config
+    mountPath: /etc/app
+    readOnly: true
+  - name: cache
+    mountPath: /tmp/cache
+  - name: persistent-storage
+    mountPath: /var/lib/app
+```
+
+## Prometheus Monitoring
+
+### ServiceMonitor
+
+<ParamField path="serviceMonitor.enabled" type="boolean" default="false">
+  Create a ServiceMonitor resource for Prometheus Operator.
+</ParamField>
+
+<ParamField path="serviceMonitor.namespace" type="string">
+  Namespace to deploy the ServiceMonitor (defaults to release namespace).
+</ParamField>
+
+<ParamField path="serviceMonitor.interval" type="string" default="30s">
+  Scrape interval for metrics.
+</ParamField>
+
+<ParamField path="serviceMonitor.labels" type="object" default="{}">
+  Additional labels for the ServiceMonitor.
+  
+  **Example**:
+  ```yaml
+  serviceMonitor:
+    labels:
+      release: prometheus-operator
+  ```
+</ParamField>
+
+### PrometheusRule
+
+<ParamField path="prometheusRule.enabled" type="boolean" default="false">
+  Create PrometheusRule resources for alerting.
+</ParamField>
+
+<ParamField path="prometheusRule.namespace" type="string">
+  Namespace to deploy the PrometheusRule (defaults to release namespace).
+</ParamField>
+
+<ParamField path="prometheusRule.additionalLabels" type="object" default="{}">
+  Additional labels for the PrometheusRule.
+  
+  **Example**:
+  ```yaml
+  prometheusRule:
+    additionalLabels:
+      release: prometheus-operator
+  ```
+</ParamField>
+
+<ParamField path="prometheusRule.rules" type="array" default="[]">
+  Prometheus alerting rules.
+  
+  **Example**:
+  ```yaml
+  prometheusRule:
+    rules:
+      - alert: HighErrorRate
+        expr: rate(http_requests_total{status="500"}[5m]) > 0.05
+        for: 5m
+        labels:
+          severity: warning
+        annotations:
+          summary: High error rate detected
+          description: "Error rate is {{ $value }} errors/sec"
+  ```
+</ParamField>
+
+### Example Prometheus Configuration
+
+```yaml
+serviceMonitor:
+  enabled: true
+  namespace: monitoring
+  interval: 30s
+  labels:
+    release: prometheus-operator
+  relabelings: []
+  metricRelabelings: []
+
+prometheusRule:
+  enabled: true
+  namespace: monitoring
+  additionalLabels:
+    release: prometheus-operator
+  rules:
+    - alert: PodDown
+      expr: up{job="myapp"} == 0
+      for: 2m
+      labels:
+        severity: critical
+      annotations:
+        summary: "Pod {{ $labels.instance }} is down"
+        description: "Pod has been down for more than 2 minutes"
+```
+
+## Name Overrides
+
+<ParamField path="nameOverride" type="string" default="">
+  Override the chart name used in resource names.
+  
+  <Note>
+    Use sparingly. This affects the `nginx.name` helper template.
+  </Note>
+</ParamField>
+
+<ParamField path="fullnameOverride" type="string" default="">
+  Override the full resource name.
+  
+  <Warning>
+    This completely replaces the generated name. Use with caution as it can cause naming conflicts.
+  </Warning>
+</ParamField>
+
+## Next Steps
+
+- See [Chart Reference Overview](/reference/overview) for template patterns
+- Review [Chart Development](/contributing/chart-development) for creating charts
+- Check individual chart documentation for chart-specific parameters

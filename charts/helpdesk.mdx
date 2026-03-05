@@ -1,0 +1,199 @@
+---
+title: Helpdesk
+description: Deploy Douban Helpdesk self-service platform on Kubernetes
+---
+
+The Helpdesk chart deploys Douban Helpdesk, a self-service platform that integrates with tools like StackStorm, Airflow, and Spincycle to provide automated workflow management and operations.
+
+## What It Deploys
+
+This chart deploys:
+- Helpdesk backend API (version 0.2.0)
+- Helpdesk frontend web interface
+- Service for HTTP traffic
+- Optional Ingress or HTTPRoute for external access
+- ConfigMap or Secret for application configuration
+
+## Installation
+
+```bash
+helm repo add douban https://douban.github.io/charts/
+helm install my-helpdesk douban/helpdesk -f values.yaml
+```
+
+## Key Configuration Parameters
+
+<ParamField path="replicaCount" type="number" default="2">
+  Number of backend replicas to deploy
+</ParamField>
+
+<ParamField path="image.repository" type="string" default="douz/helpdesk">
+  Backend Docker image repository
+</ParamField>
+
+<ParamField path="image.tag" type="string" default="latest">
+  Backend image tag
+</ParamField>
+
+<ParamField path="frontend.replicaCount" type="number" default="2">
+  Number of frontend replicas to deploy
+</ParamField>
+
+<ParamField path="frontend.image.repository" type="string" default="douz/helpdesk-frontend">
+  Frontend Docker image repository
+</ParamField>
+
+<ParamField path="frontend.image.tag" type="string" default="latest">
+  Frontend image tag
+</ParamField>
+
+<ParamField path="config" type="string" default="">
+  Application configuration (YAML or JSON format)
+</ParamField>
+
+<ParamField path="secretName" type="string" default="helpdesk">
+  Name of the secret containing configuration
+</ParamField>
+
+<ParamField path="existingSecret" type="boolean" default="false">
+  Use an existing secret instead of creating a new one
+</ParamField>
+
+<ParamField path="ingress.enabled" type="boolean" default="false">
+  Enable Ingress resource for external access
+</ParamField>
+
+<ParamField path="httpRoute.enabled" type="boolean" default="false">
+  Enable HTTPRoute resource for Gateway API routing
+</ParamField>
+
+## Example Configurations
+
+### Basic Deployment with Ingress
+
+```yaml
+replicaCount: 3
+
+frontend:
+  replicaCount: 3
+
+ingress:
+  enabled: true
+  className: "nginx"
+  hosts:
+    - host: "helpdesk.example.com"
+      pathType: Prefix
+  tls:
+    - secretName: helpdesk-tls
+      hosts:
+        - helpdesk.example.com
+
+resources:
+  limits:
+    cpu: 500m
+    memory: 512Mi
+  requests:
+    cpu: 250m
+    memory: 256Mi
+```
+
+### Using Existing Secret for Configuration
+
+```yaml
+existingSecret: true
+secretName: my-helpdesk-config
+```
+
+Create the secret separately:
+
+```bash
+kubectl create secret generic my-helpdesk-config \
+  --from-file=config.yaml=./my-config.yaml
+```
+
+### With Inline Configuration
+
+```yaml
+config: |
+  database:
+    host: postgres.example.com
+    port: 5432
+    name: helpdesk
+  integrations:
+    stackstorm:
+      enabled: true
+      api_url: https://st2.example.com/api
+    airflow:
+      enabled: true
+      api_url: https://airflow.example.com/api/v1
+```
+
+### With Gateway API HTTPRoute
+
+```yaml
+httpRoute:
+  enabled: true
+  gatewayRef:
+    name: envoy-gateway-bundle
+    namespace: envoy-gateway-system
+  reuseIngressConfiguration: true
+```
+
+<Accordion title="Environment Variables and Volumes">
+
+### Custom Environment Variables
+
+```yaml
+env:
+  - name: LOG_LEVEL
+    value: "DEBUG"
+  - name: DATABASE_URL
+    valueFrom:
+      secretKeyRef:
+        name: helpdesk-db
+        key: url
+```
+
+### Custom Volumes
+
+```yaml
+volumes:
+  - name: plugins
+    configMap:
+      name: helpdesk-plugins
+
+volumeMounts:
+  - name: plugins
+    mountPath: /app/plugins
+    readOnly: true
+```
+
+</Accordion>
+
+<Accordion title="Advanced Routing">
+
+### Custom HTTPRoute Paths
+
+```yaml
+httpRoute:
+  enabled: true
+  reuseIngressConfiguration: false
+  hostnames:
+    - helpdesk.example.com
+  extraPaths:
+    - matches:
+        - path:
+            type: PathPrefix
+            value: /api/v2
+      backendRefs:
+        - name: helpdesk-api-v2
+          port: 8080
+```
+
+</Accordion>
+
+## Links
+
+- [Helpdesk GitHub Repository](https://github.com/douban/helpdesk)
+- Maintainer: sysadmin@douban.com
+- [Chart Source](https://github.com/douban/charts)

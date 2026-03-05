@@ -1,0 +1,480 @@
+---
+title: "Values Configuration"
+description: "Understanding and customizing values.yaml in Helm charts"
+---
+
+## Overview
+
+The `values.yaml` file is the primary configuration interface for Helm charts. It defines default values that can be overridden during installation or upgrade to customize your deployment.
+
+## Common Value Patterns
+
+### Image Configuration
+
+All charts follow a consistent pattern for image configuration:
+
+```yaml
+image:
+  repository: nginx
+  pullPolicy: IfNotPresent
+  tag: ""  # Defaults to chart appVersion if not set
+
+imagePullSecrets: []
+```
+
+**Key Points:**
+- If `tag` is empty, the chart's `appVersion` is used automatically
+- `pullPolicy` defaults to `IfNotPresent` to reduce registry calls
+- Use `imagePullSecrets` for private registries
+
+### Replica and Scaling
+
+<Tabs>
+  <Tab title="Static Replicas">
+    ```yaml
+    replicaCount: 1
+    autoscaling:
+      enabled: false
+    ```
+    
+    Use fixed replica count for predictable workloads.
+  </Tab>
+  <Tab title="Autoscaling">
+    ```yaml
+    replicaCount: 1  # Ignored when autoscaling enabled
+    autoscaling:
+      enabled: true
+      minReplicas: 1
+      maxReplicas: 100
+      targetCPUUtilizationPercentage: 80
+      # targetMemoryUtilizationPercentage: 80
+    ```
+    
+    Enable horizontal pod autoscaling based on CPU or memory usage.
+  </Tab>
+</Tabs>
+
+### Service Configuration
+
+```yaml
+service:
+  type: ClusterIP
+  port: 80
+
+containerPort: 80
+```
+
+**Service Types:**
+- `ClusterIP`: Internal cluster access only (default)
+- `NodePort`: Exposes on each node's IP at a static port
+- `LoadBalancer`: Creates external load balancer
+
+### Service Account
+
+```yaml
+serviceAccount:
+  create: true
+  annotations: {}
+  name: ""  # Auto-generated if empty
+```
+
+**Best Practices:**
+- Always create a service account for proper RBAC
+- Use annotations for cloud provider integrations (e.g., AWS IAM roles)
+- Let the chart generate the name unless you need specific naming
+
+## Overriding Values
+
+### Using `--set` Flag
+
+For simple overrides during installation:
+
+<CodeGroup>
+```bash Single Value
+helm install my-nginx ./nginx \
+  --set replicaCount=3
+```
+
+```bash Multiple Values
+helm install my-nginx ./nginx \
+  --set replicaCount=3 \
+  --set image.tag=1.25.0 \
+  --set service.type=LoadBalancer
+```
+
+```bash Nested Values
+helm install my-nginx ./nginx \
+  --set ingress.enabled=true \
+  --set ingress.hosts[0].host=example.com \
+  --set ingress.hosts[0].paths[0].path=/
+```
+</CodeGroup>
+
+**When to use `--set`:**
+- Quick testing and experimentation
+- Single value changes
+- CI/CD pipelines with dynamic values
+
+### Using Values Files
+
+For complex configurations, create a custom values file:
+
+<CodeGroup>
+```yaml custom-values.yaml
+replicaCount: 3
+
+image:
+  repository: nginx
+  tag: "1.25.0"
+
+service:
+  type: LoadBalancer
+  port: 80
+
+ingress:
+  enabled: true
+  className: nginx
+  hosts:
+    - host: myapp.example.com
+      paths:
+        - path: /
+          pathType: Prefix
+
+resources:
+  limits:
+    cpu: 200m
+    memory: 256Mi
+  requests:
+    cpu: 100m
+    memory: 128Mi
+```
+
+```bash Installation
+helm install my-nginx ./nginx -f custom-values.yaml
+```
+
+```bash Multiple Files
+# Later files override earlier ones
+helm install my-nginx ./nginx \
+  -f base-values.yaml \
+  -f production-values.yaml
+```
+</CodeGroup>
+
+**When to use values files:**
+- Production deployments
+- Environment-specific configurations
+- Complex multi-value changes
+- Version-controlled configurations
+
+### Combining Methods
+
+```bash
+# Values files are applied first, then --set overrides
+helm install my-nginx ./nginx \
+  -f production-values.yaml \
+  --set image.tag=1.25.1
+```
+
+## Environment Variables
+
+### Simple Environment Variables
+
+Most charts support the `env` field for custom environment variables:
+
+```yaml
+env:
+  - name: LOG_LEVEL
+    value: "debug"
+  - name: FEATURE_FLAG
+    value: "true"
+  - name: API_ENDPOINT
+    value: "https://api.example.com"
+```
+
+### Environment Variables from Secrets
+
+```yaml
+env:
+  - name: DATABASE_PASSWORD
+    valueFrom:
+      secretKeyRef:
+        name: app-secrets
+        key: db-password
+  - name: API_KEY
+    valueFrom:
+      secretKeyRef:
+        name: app-secrets
+        key: api-key
+```
+
+### Environment Variables from ConfigMaps
+
+```yaml
+env:
+  - name: APP_CONFIG
+    valueFrom:
+      configMapKeyRef:
+        name: app-config
+        key: config.json
+```
+
+### Chart-Specific Patterns
+
+Some charts use different naming conventions:
+
+<Tabs>
+  <Tab title="extraEnvs">
+    ```yaml
+    # Used in aliyun-exporter chart
+    extraEnvs:
+      - name: CUSTOM_VAR
+        value: "custom-value"
+    ```
+  </Tab>
+  <Tab title="envs.config/secret">
+    ```yaml
+    # Used in kafka-ui chart
+    envs:
+      config:
+        LOG_LEVEL: debug
+        FEATURE_FLAG: "true"
+      secret:
+        API_KEY: "secret-value"
+    ```
+  </Tab>
+  <Tab title="global.extraEnvs">
+    ```yaml
+    # Used in dify chart for all components
+    global:
+      extraEnvs:
+        - name: SHARED_CONFIG
+          value: "shared-value"
+    ```
+  </Tab>
+</Tabs>
+
+## Name Overrides
+
+```yaml
+# Partially override the chart name
+nameOverride: "my-app"
+
+# Completely override the full name
+fullnameOverride: "custom-name"
+```
+
+**Impact:**
+- `nameOverride`: Replaces the chart name in resource names
+- `fullnameOverride`: Completely replaces the generated full name
+- Affects all Kubernetes resources (Deployments, Services, etc.)
+
+## Viewing Effective Values
+
+### Inspect Default Values
+
+```bash
+# Show all default values from the chart
+helm show values ./nginx
+```
+
+### Check Deployed Values
+
+```bash
+# View values used in a deployed release
+helm get values my-nginx
+
+# Include default values
+helm get values my-nginx --all
+```
+
+### Preview Before Install
+
+```bash
+# Render templates without installing
+helm template my-nginx ./nginx -f custom-values.yaml
+
+# Debug mode shows more details
+helm install my-nginx ./nginx -f custom-values.yaml --dry-run --debug
+```
+
+## Best Practices
+
+<AccordionGroup>
+  <Accordion title="Use Values Files for Production">
+    Always use values files for production deployments. This allows:
+    - Version control integration
+    - Easier review and audit
+    - Consistent deployments
+    - Better documentation
+  </Accordion>
+
+  <Accordion title="Organize by Environment">
+    Structure your values files by environment:
+    ```
+    values/
+      base.yaml        # Common to all environments
+      dev.yaml         # Development overrides
+      staging.yaml     # Staging overrides
+      production.yaml  # Production overrides
+    ```
+  </Accordion>
+
+  <Accordion title="Never Commit Secrets">
+    Never put sensitive values in values files:
+    - Use Kubernetes Secrets
+    - Reference secrets via `valueFrom.secretKeyRef`
+    - Consider tools like sealed-secrets or external-secrets
+  </Accordion>
+
+  <Accordion title="Document Custom Values">
+    Create a README with your custom values:
+    ```yaml
+    # Custom values for production deployment
+    # Last updated: 2024-03-05
+    # Owner: Platform Team
+    
+    replicaCount: 3  # High availability
+    ```
+  </Accordion>
+
+  <Accordion title="Use Specific Image Tags">
+    Always specify image tags in production:
+    ```yaml
+    # Bad - uses latest
+    image:
+      tag: ""
+    
+    # Good - pinned version
+    image:
+      tag: "1.25.0"
+    ```
+  </Accordion>
+</AccordionGroup>
+
+## Common Patterns Across Charts
+
+### Standard Fields
+
+These fields appear consistently across all charts:
+
+```yaml
+replicaCount: 1
+image:
+  repository: ""
+  pullPolicy: IfNotPresent
+  tag: ""
+imagePullSecrets: []
+nameOverride: ""
+fullnameOverride: ""
+serviceAccount:
+  create: true
+  annotations: {}
+  name: ""
+podAnnotations: {}
+podSecurityContext: {}
+securityContext: {}
+service:
+  type: ClusterIP
+  port: 80
+resources: {}
+autoscaling:
+  enabled: false
+  minReplicas: 1
+  maxReplicas: 100
+  targetCPUUtilizationPercentage: 80
+nodeSelector: {}
+tolerations: []
+affinity: {}
+```
+
+### Optional Components
+
+Many charts include these optional features:
+
+```yaml
+ingress:
+  enabled: false
+  className: ""
+  annotations: {}
+  hosts: []
+  tls: []
+
+httpRoute:
+  enabled: false
+  gatewayRef:
+    name: envoy-gateway-bundle
+    namespace: envoy-gateway-system
+
+serviceMonitor:
+  enabled: false
+
+prometheusRule:
+  enabled: false
+```
+
+## Troubleshooting
+
+### Values Not Applied
+
+```bash
+# Check syntax
+helm lint ./nginx -f custom-values.yaml
+
+# Verify rendering
+helm template my-nginx ./nginx -f custom-values.yaml | grep -A 10 "kind: Deployment"
+```
+
+### Type Mismatches
+
+```yaml
+# Wrong - string instead of number
+replicaCount: "3"
+
+# Correct
+replicaCount: 3
+
+# Wrong - missing quotes for special values
+service:
+  type: ClusterIP
+  annotations:
+    value: true  # YAML interprets as boolean
+
+# Correct
+service:
+  type: ClusterIP
+  annotations:
+    value: "true"  # Quoted string
+```
+
+### Debugging Template Rendering
+
+```bash
+# Show what values are actually used
+helm get values my-nginx
+
+# See full manifest
+helm get manifest my-nginx
+
+# Test template rendering
+helm template my-nginx ./nginx \
+  -f custom-values.yaml \
+  --debug
+```
+
+## Next Steps
+
+<CardGroup cols={2}>
+  <Card title="Customization" icon="wrench" href="/configuration/customization">
+    Learn advanced customization techniques
+  </Card>
+  <Card title="Ingress" icon="network-wired" href="/configuration/ingress">
+    Configure ingress and routing
+  </Card>
+  <Card title="Monitoring" icon="chart-line" href="/configuration/monitoring">
+    Set up Prometheus monitoring
+  </Card>
+  <Card title="Chart Development" icon="code" href="/development">
+    Create your own charts
+  </Card>
+</CardGroup>

@@ -1,122 +1,118 @@
 {
   "$schema": "https://mintlify.com/docs.json",
-  "theme": "mint",
-  "name": "Mint Starter Kit",
+  "name": "Douban Helm Charts",
+  "theme": "aspen",
   "colors": {
-    "primary": "#16A34A",
-    "light": "#07C983",
-    "dark": "#15803D"
+    "primary": "#326CE5",
+    "light": "#4A90E2",
+    "dark": "#1E4D8B"
   },
-  "favicon": "/favicon.svg",
+  "navbar": {
+    "primary": {
+      "type": "github",
+      "href": "https://github.com/douban/charts"
+    }
+  },
+  "footer": {
+    "socials": {
+      "github": "https://github.com/douban/charts"
+    }
+  },
   "navigation": {
     "tabs": [
       {
-        "tab": "Guides",
+        "tab": "Documentation",
         "groups": [
           {
-            "group": "Getting started",
+            "group": "Get Started",
             "pages": [
-              "index",
+              "introduction",
               "quickstart",
-              "development"
+              "installation"
             ]
           },
           {
-            "group": "Customization",
+            "group": "Web Services",
             "pages": [
-              "essentials/settings",
-              "essentials/navigation"
+              "charts/nginx",
+              "charts/helpdesk",
+              "charts/dify",
+              "charts/overlord"
             ]
           },
           {
-            "group": "Writing content",
+            "group": "Monitoring & Exporters",
             "pages": [
-              "essentials/markdown",
-              "essentials/code",
-              "essentials/images",
-              "essentials/reusable-snippets"
+              "charts/prometheus-beanstalkd-exporter",
+              "charts/prometheus-memcached-exporter",
+              "charts/aliyun-exporter",
+              "charts/tencentcloud-exporter",
+              "charts/tencentcloud-info-exporter",
+              "charts/qiniu-exporter",
+              "charts/ucloud-exporter",
+              "charts/upyun-exporter",
+              "charts/tinyproxy-exporter"
             ]
           },
           {
-            "group": "AI tools",
+            "group": "Infrastructure",
             "pages": [
-              "ai-tools/cursor",
-              "ai-tools/claude-code",
-              "ai-tools/windsurf"
+              "charts/coredns",
+              "charts/gatekeeper",
+              "charts/cbs-csi-driver",
+              "charts/clb-controller-manager",
+              "charts/gateway-role",
+              "charts/k8s-cron"
+            ]
+          },
+          {
+            "group": "Applications",
+            "pages": [
+              "charts/archery",
+              "charts/channels",
+              "charts/codecov",
+              "charts/goinception",
+              "charts/healthchecks",
+              "charts/kafka-ui",
+              "charts/karma",
+              "charts/mergeable",
+              "charts/nonebot",
+              "charts/pint",
+              "charts/probot",
+              "charts/redirect",
+              "charts/selenium"
+            ]
+          },
+          {
+            "group": "Configuration",
+            "pages": [
+              "configuration/values",
+              "configuration/customization",
+              "configuration/ingress",
+              "configuration/monitoring"
+            ]
+          },
+          {
+            "group": "Contributing",
+            "pages": [
+              "contributing/guidelines",
+              "contributing/chart-development"
             ]
           }
         ]
       },
       {
-        "tab": "API reference",
+        "tab": "Chart Reference",
         "groups": [
           {
-            "group": "API documentation",
+            "group": "Overview",
             "pages": [
-              "api-reference/introduction"
-            ]
-          },
-          {
-            "group": "Endpoint examples",
-            "pages": [
-              "api-reference/endpoint/get",
-              "api-reference/endpoint/create",
-              "api-reference/endpoint/delete",
-              "api-reference/endpoint/webhook"
+              "reference/overview",
+              "reference/common-parameters"
             ]
           }
         ]
       }
-    ],
-    "global": {
-      "anchors": [
-        {
-          "anchor": "Documentation",
-          "href": "https://mintlify.com/docs",
-          "icon": "book-open-cover"
-        },
-        {
-          "anchor": "Blog",
-          "href": "https://mintlify.com/blog",
-          "icon": "newspaper"
-        }
-      ]
-    }
-  },
-  "logo": {
-    "light": "/logo/light.svg",
-    "dark": "/logo/dark.svg"
-  },
-  "navbar": {
-    "links": [
-      {
-        "label": "Support",
-        "href": "mailto:hi@mintlify.com"
-      }
-    ],
-    "primary": {
-      "type": "button",
-      "label": "Dashboard",
-      "href": "https://dashboard.mintlify.com"
-    }
-  },
-  "contextual": {
-    "options": [
-     "copy",
-     "view",
-     "chatgpt",
-     "claude",
-     "perplexity",
-     "mcp",
-     "cursor",
-     "vscode"
-   ]
-  },
-  "footer": {
-    "socials": {
-      "x": "https://x.com/mintlify",
-      "github": "https://github.com/mintlify",
-      "linkedin": "https://linkedin.com/company/mintlify"
-    }
+    ]
   }
 }

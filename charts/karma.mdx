@@ -1,0 +1,430 @@
+---
+title: Karma
+description: Alert dashboard for Prometheus Alertmanager
+---
+
+Karma is an ASL2 licensed alert dashboard for Prometheus Alertmanager.
+
+## Overview
+
+Karma provides a clean, efficient interface for viewing and managing alerts from one or more Alertmanager instances. It helps teams quickly identify and respond to alerts across multiple Prometheus deployments.
+
+**Upstream project**: [https://github.com/prymitive/karma](https://github.com/prymitive/karma)
+
+## Installation
+
+```bash
+helm repo add wiremind https://wiremind.github.io/wiremind-helm-charts
+helm repo update
+helm install karma wiremind/karma
+```
+
+Or using the Douban repository:
+
+```bash
+helm repo add douban https://douban.github.io/charts/
+helm install karma douban/karma
+```
+
+## Configuration
+
+### Basic Configuration
+
+```yaml
+image:
+  repository: ghcr.io/prymitive/karma
+  tag: v0.85
+  pullPolicy: IfNotPresent
+
+replicaCount: 1
+
+service:
+  type: ClusterIP
+  port: 80
+```
+
+### Environment Variables
+
+Simple configuration via environment variable:
+
+```yaml
+env:
+  - name: ALERTMANAGER_URI
+    value: http://alertmanager:9093
+```
+
+### ConfigMap-based Configuration
+
+For advanced configuration, use a ConfigMap:
+
+```yaml
+configMap:
+  enabled: true
+  rawConfig:
+    alertmanager:
+      interval: 30s
+      servers:
+        - name: production
+          uri: http://alertmanager-prod:9093
+          timeout: 10s
+          proxy: true
+        - name: staging
+          uri: http://alertmanager-staging:9093
+          timeout: 10s
+    
+    annotations:
+      default:
+        hidden: false
+      hidden:
+        - help
+      visible: []
+    
+    filters:
+      default:
+        - "@receiver=by-cluster-service"
+    
+    labels:
+      color:
+        static:
+          - job
+        unique:
+          - cluster
+          - instance
+          - "@receiver"
+    
+    listen:
+      address: "0.0.0.0"
+      port: 8080
+      prefix: /
+    
+    log:
+      config: false
+      level: info
+```
+
+### Secret-based Configuration
+
+For sensitive data (basic auth, API tokens):
+
+```yaml
+existingSecretConfig:
+  enabled: true
+  secretName: "karma-secret-config"
+```
+
+Create the secret:
+
+```bash
+cat > karma.conf <<EOL
+alertmanager:
+  servers:
+    - name: secure-alertmanager
+      uri: https://user:password@alertmanager.prod.example.com
+      timeout: 10s
+EOL
+
+kubectl create secret generic karma-secret-config \
+  --from-file=karma.conf=./karma.conf
+```
+
+### TLS Configuration
+
+Mount TLS certificates for Alertmanager connections:
+
+```yaml
+certSecretNames:
+  - alertmanager-client-certs
+  - custom-ca-bundle
+
+configMap:
+  enabled: true
+  rawConfig:
+    alertmanager:
+      servers:
+        - name: tls-alertmanager
+          uri: https://alertmanager:9093
+          timeout: 10s
+          tls:
+            ca: /etc/certs/custom-ca-bundle/ca.crt
+            cert: /etc/certs/alertmanager-client-certs/tls.crt
+            key: /etc/certs/alertmanager-client-certs/tls.key
+```
+
+### Multiple Alertmanager Instances
+
+```yaml
+configMap:
+  enabled: true
+  rawConfig:
+    alertmanager:
+      interval: 60s
+      servers:
+        - name: us-east
+          uri: http://alertmanager-us-east:9093
+        - name: us-west
+          uri: http://alertmanager-us-west:9093
+        - name: eu-central
+          uri: http://alertmanager-eu:9093
+```
+
+### Custom Headers
+
+```yaml
+configMap:
+  rawConfig:
+    alertmanager:
+      servers:
+        - name: authenticated
+          uri: http://alertmanager:9093
+          headers:
+            x-auth-token: some-token
+            custom-header: value
+```
+
+## Access Configuration
+
+### Ingress
+
+```yaml
+ingress:
+  enabled: true
+  className: "nginx"
+  annotations:
+    cert-manager.io/cluster-issuer: "letsencrypt"
+  hosts:
+    - host: karma.example.com
+      paths:
+        - path: /
+          pathType: ImplementationSpecific
+  tls:
+    - secretName: karma-tls
+      hosts:
+        - karma.example.com
+```
+
+### Probes
+
+```yaml
+livenessProbe:
+  delay: 5
+  period: 5
+  path: /health
+```
+
+## Example Values
+
+### Simple Single Alertmanager
+
+```yaml
+image:
+  repository: ghcr.io/prymitive/karma
+  tag: v0.85
+
+replicaCount: 1
+
+env:
+  - name: ALERTMANAGER_URI
+    value: http://prometheus-alertmanager:9093
+
+ingress:
+  enabled: true
+  className: "nginx"
+  hosts:
+    - host: karma.example.com
+      paths:
+        - path: /
+          pathType: ImplementationSpecific
+
+resources:
+  limits:
+    cpu: 100m
+    memory: 128Mi
+  requests:
+    cpu: 50m
+    memory: 64Mi
+```
+
+### Multi-Alertmanager with Custom Config
+
+```yaml
+image:
+  repository: ghcr.io/prymitive/karma
+  tag: v0.85
+
+replicaCount: 2
+
+configMap:
+  enabled: true
+  rawConfig:
+    alertmanager:
+      interval: 30s
+      servers:
+        - name: prod-us-east
+          uri: http://alertmanager-prod-use1:9093
+          timeout: 10s
+          proxy: true
+        - name: prod-us-west
+          uri: http://alertmanager-prod-usw2:9093
+          timeout: 10s
+          proxy: true
+        - name: staging
+          uri: http://alertmanager-staging:9093
+          timeout: 10s
+    
+    annotations:
+      default:
+        hidden: false
+      hidden:
+        - description
+        - runbook_url
+    
+    filters:
+      default:
+        - "@state=active"
+    
+    labels:
+      color:
+        static:
+          - severity
+          - alertname
+        unique:
+          - cluster
+          - instance
+      keep:
+        - severity
+        - alertname
+        - cluster
+      strip:
+        - job
+    
+    listen:
+      address: "0.0.0.0"
+      port: 8080
+      prefix: /
+    
+    log:
+      level: info
+      config: true
+
+ingress:
+  enabled: true
+  className: "nginx"
+  annotations:
+    cert-manager.io/cluster-issuer: "letsencrypt-prod"
+    nginx.ingress.kubernetes.io/auth-type: basic
+    nginx.ingress.kubernetes.io/auth-secret: karma-basic-auth
+  hosts:
+    - host: alerts.example.com
+      paths:
+        - path: /
+          pathType: ImplementationSpecific
+  tls:
+    - secretName: karma-tls
+      hosts:
+        - alerts.example.com
+
+resources:
+  limits:
+    cpu: 200m
+    memory: 256Mi
+  requests:
+    cpu: 100m
+    memory: 128Mi
+
+podAnnotations:
+  prometheus.io/scrape: "true"
+  prometheus.io/port: "8080"
+  prometheus.io/path: "/metrics"
+```
+
+### Production Setup with TLS
+
+```yaml
+image:
+  repository: ghcr.io/prymitive/karma
+  tag: v0.85
+
+replicaCount: 3
+
+certSecretNames:
+  - alertmanager-client-certs
+  - internal-ca-bundle
+
+existingSecretConfig:
+  enabled: true
+  secretName: karma-config-secret
+
+ingress:
+  enabled: true
+  className: "nginx"
+  annotations:
+    cert-manager.io/cluster-issuer: "letsencrypt-prod"
+  hosts:
+    - host: karma.production.example.com
+      paths:
+        - path: /
+          pathType: Prefix
+  tls:
+    - secretName: karma-production-tls
+      hosts:
+        - karma.production.example.com
+
+service:
+  type: ClusterIP
+  port: 80
+  annotations:
+    prometheus.io/scrape: "true"
+
+resources:
+  limits:
+    cpu: 500m
+    memory: 512Mi
+  requests:
+    cpu: 200m
+    memory: 256Mi
+
+affinity:
+  podAntiAffinity:
+    preferredDuringSchedulingIgnoredDuringExecution:
+      - weight: 100
+        podAffinityTerm:
+          labelSelector:
+            matchExpressions:
+              - key: app.kubernetes.io/name
+                operator: In
+                values:
+                  - karma
+          topologyKey: kubernetes.io/hostname
+```
+
+## Key Parameters
+
+| Parameter | Description | Default |
+|-----------|-------------|----------|
+| `image.repository` | Karma image | `ghcr.io/prymitive/karma` |
+| `image.tag` | Image tag | `v0.85` |
+| `replicaCount` | Number of replicas | `1` |
+| `service.port` | Service port | `80` |
+| `configMap.enabled` | Enable ConfigMap config | `false` |
+| `existingSecretConfig.enabled` | Use existing secret | `false` |
+| `livenessProbe.path` | Liveness probe path | `/health` |
+
+## Configuration Options
+
+Karma supports extensive configuration. Key sections:
+
+- **alertmanager.servers** - Define Alertmanager instances
+- **annotations** - Control which alert annotations to show/hide
+- **filters** - Default alert filters
+- **labels** - Label coloring and visibility
+- **listen** - HTTP server configuration
+- **log** - Logging configuration
+- **jira** - JIRA ticket linking
+
+See the [upstream documentation](https://github.com/prymitive/karma/blob/master/docs/CONFIGURATION.md) for complete details.
+
+## Requirements
+
+- Kubernetes 1.9+
+- Helm 3+
+- Prometheus Alertmanager instance(s)

@@ -1,0 +1,529 @@
+---
+title: CLB Controller Manager
+description: Tencent Cloud Load Balancer controller for Kubernetes LoadBalancer services
+---
+
+The CLB (Cloud Load Balancer) Controller Manager integrates Tencent Cloud Load Balancers with Kubernetes, automatically provisioning and managing CLBs for LoadBalancer-type services.
+
+## Overview
+
+The CLB Controller Manager provides:
+
+- **Automatic CLB Provisioning**: Create CLBs for LoadBalancer services
+- **Load Balancer Management**: Sync service endpoints to CLB backends
+- **Health Checks**: Automatic health check configuration
+- **Internal and Public LBs**: Support for both internal and internet-facing load balancers
+- **Annotation-Based Configuration**: Control CLB features via service annotations
+
+## Prerequisites
+
+- Kubernetes cluster v1.16+
+- Tencent Cloud VPC and subnet
+- Tencent Cloud API credentials (SecretId and SecretKey)
+- Knowledge of Tencent Cloud CLB concepts
+- Cluster nodes must be Tencent Cloud CVM instances
+
+<Warning>
+  This controller creates real cloud resources that incur costs. Each LoadBalancer service creates a CLB instance. Ensure proper resource cleanup to avoid unexpected charges.
+</Warning>
+
+## Installation
+
+### Basic Installation
+
+Install with required credentials:
+
+```bash
+helm repo add douban https://douban.github.io/charts/
+helm install clb-manager douban/clb-controller-manager \
+  --namespace kube-system \
+  --set secret.region="ap-guangzhou" \
+  --set secret.vpc_id="vpc-xxxxxx" \
+  --set secret.secret_id="YOUR_SECRET_ID" \
+  --set secret.secret_key="YOUR_SECRET_KEY"
+```
+
+### Using Existing Secret
+
+```bash
+# Create secret
+kubectl create secret generic clb-secret \
+  --from-literal=region="ap-guangzhou" \
+  --from-literal=vpc_id="vpc-xxxxxx" \
+  --from-literal=secret_id="YOUR_SECRET_ID" \
+  --from-literal=secret_key="YOUR_SECRET_KEY" \
+  -n kube-system
+
+# Install using existing secret
+helm install clb-manager douban/clb-controller-manager \
+  --namespace kube-system \
+  --set secret.existingSecret=clb-secret
+```
+
+### With Custom Configuration
+
+```bash
+helm install clb-manager douban/clb-controller-manager \
+  --namespace kube-system \
+  --set secret.region="ap-guangzhou" \
+  --set secret.vpc_id="vpc-xxxxxx" \
+  --set secret.secret_id="YOUR_SECRET_ID" \
+  --set secret.secret_key="YOUR_SECRET_KEY" \
+  --set env.clbTag="environment=production,team=platform" \
+  --set replicaCount=2
+```
+
+## Configuration
+
+### Essential Parameters
+
+| Parameter | Description | Required |
+|-----------|-------------|----------|
+| `secret.region` | Tencent Cloud region | Yes |
+| `secret.vpc_id` | VPC ID where CLBs will be created | Yes |
+| `secret.secret_id` | Tencent Cloud API Secret ID | Yes |
+| `secret.secret_key` | Tencent Cloud API Secret Key | Yes |
+| `secret.existingSecret` | Use existing secret | No |
+| `env.clbPrefix` | Resource ID prefix for CLB | No |
+| `env.clbTag` | Default tags for all CLBs | No |
+
+### Controller Configuration
+
+```yaml
+replicaCount: 2
+
+image:
+  repository: ccr.ccs.tencentyun.com/tkeimages/clb-controller-manager
+  pullPolicy: Always
+  tag: "v1.30.1-v2.4"
+
+resources:
+  limits:
+    cpu: 200m
+    memory: 256Mi
+  requests:
+    cpu: 100m
+    memory: 128Mi
+
+priorityClassName: system-cluster-critical
+
+hostNetwork: true
+dnsPolicy: Default
+
+tolerations:
+  - key: "node.cloudprovider.kubernetes.io/uninitialized"
+    value: "true"
+    effect: "NoSchedule"
+  - key: "CriticalAddonsOnly"
+    operator: "Exists"
+  - key: "node-role.kubernetes.io/master"
+    effect: "NoSchedule"
+```
+
+### Environment Variables
+
+```yaml
+env:
+  # Resource ID prefix for Tencent Cloud tags
+  clbPrefix: "clb"
+  
+  # Fixed tags for all CLBs (shown in console)
+  # Format: tagName=tagValue,tagName2=tagValue2
+  clbTag: "managed-by=kubernetes,cluster=production"
+```
+
+## Service Annotations
+
+### Required Annotations
+
+These annotations are required for CLB creation:
+
+```yaml
+apiVersion: v1
+kind: Service
+metadata:
+  annotations:
+    # CLB name (required)
+    service.beta.kubernetes.io/cvm-loadbalancer-name: "my-loadbalancer"
+    
+    # Subnet ID (required)
+    service.beta.kubernetes.io/cvm-loadbalancer-subnet-id: "subnet-xxxxxxxx"
+    
+    # CLB type: "open" (public) or "internal" (required)
+    service.beta.kubernetes.io/cvm-loadbalancer-type: "internal"
+spec:
+  type: LoadBalancer
+  ports:
+    - port: 80
+      targetPort: 8080
+```
+
+### Optional Annotations
+
+```yaml
+annotations:
+  # Enable health checks (default: "yes")
+  service.beta.kubernetes.io/cvm-loadbalancer-healthcheck: "yes"
+  
+  # Pre-existing VIP (optional)
+  service.beta.kubernetes.io/cvm-loadbalancer-vip: "10.0.0.100"
+  
+  # Bandwidth limit in Mbps (optional, default: 10)
+  service.beta.kubernetes.io/cvm-loadbalancer-bandwidth: "20"
+  
+  # Internet charge type for public CLB
+  service.beta.kubernetes.io/cvm-loadbalancer-internet-charge-type: "TRAFFIC_POSTPAID_BY_HOUR"
+  
+  # Session affinity timeout in seconds
+  service.beta.kubernetes.io/cvm-loadbalancer-session-persist: "3600"
+```
+
+## Real-World Examples
+
+### Example 1: Internal Load Balancer for Web App
+
+```yaml
+apiVersion: v1
+kind: Service
+metadata:
+  name: web-app-internal
+  namespace: production
+  annotations:
+    service.beta.kubernetes.io/cvm-loadbalancer-name: "web-app-internal-lb"
+    service.beta.kubernetes.io/cvm-loadbalancer-type: "internal"
+    service.beta.kubernetes.io/cvm-loadbalancer-subnet-id: "subnet-prod-001"
+    service.beta.kubernetes.io/cvm-loadbalancer-healthcheck: "yes"
+spec:
+  type: LoadBalancer
+  selector:
+    app: web-app
+  ports:
+    - name: http
+      port: 80
+      targetPort: 8080
+      protocol: TCP
+    - name: https
+      port: 443
+      targetPort: 8443
+      protocol: TCP
+---
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: web-app
+  namespace: production
+spec:
+  replicas: 3
+  selector:
+    matchLabels:
+      app: web-app
+  template:
+    metadata:
+      labels:
+        app: web-app
+    spec:
+      containers:
+        - name: web
+          image: nginx:latest
+          ports:
+            - containerPort: 8080
+            - containerPort: 8443
+```
+
+### Example 2: Public Load Balancer with NodePort
+
+```yaml
+apiVersion: v1
+kind: Service
+metadata:
+  name: api-gateway-public
+  annotations:
+    service.beta.kubernetes.io/cvm-loadbalancer-name: "api-gateway-public"
+    service.beta.kubernetes.io/cvm-loadbalancer-type: "open"
+    service.beta.kubernetes.io/cvm-loadbalancer-subnet-id: "subnet-public-001"
+    service.beta.kubernetes.io/cvm-loadbalancer-bandwidth: "100"
+    service.beta.kubernetes.io/cvm-loadbalancer-internet-charge-type: "BANDWIDTH_POSTPAID_BY_HOUR"
+    service.beta.kubernetes.io/cvm-loadbalancer-healthcheck: "yes"
+spec:
+  type: LoadBalancer
+  selector:
+    app: api-gateway
+  ports:
+    - name: http
+      port: 80
+      targetPort: 8080
+      nodePort: 32080
+    - name: https
+      port: 443
+      targetPort: 8443
+      nodePort: 32443
+```
+
+### Example 3: Ingress Controller with CLB
+
+```yaml
+apiVersion: v1
+kind: Service
+metadata:
+  name: ingress-nginx-controller
+  namespace: ingress-nginx
+  annotations:
+    service.beta.kubernetes.io/cvm-loadbalancer-name: "ingress-nginx-lb"
+    service.beta.kubernetes.io/cvm-loadbalancer-type: "internal"
+    service.beta.kubernetes.io/cvm-loadbalancer-subnet-id: "subnet-ingress"
+    service.beta.kubernetes.io/cvm-loadbalancer-healthcheck: "yes"
+    service.beta.kubernetes.io/cvm-loadbalancer-session-persist: "3600"
+spec:
+  type: LoadBalancer
+  externalTrafficPolicy: Local
+  selector:
+    app.kubernetes.io/name: ingress-nginx
+    app.kubernetes.io/component: controller
+  ports:
+    - name: http
+      port: 80
+      targetPort: http
+      nodePort: 32180
+    - name: https
+      port: 443
+      targetPort: https
+      nodePort: 32543
+```
+
+### Example 4: TCP Load Balancer for Database
+
+```yaml
+apiVersion: v1
+kind: Service
+metadata:
+  name: postgresql-lb
+  annotations:
+    service.beta.kubernetes.io/cvm-loadbalancer-name: "postgresql-internal"
+    service.beta.kubernetes.io/cvm-loadbalancer-type: "internal"
+    service.beta.kubernetes.io/cvm-loadbalancer-subnet-id: "subnet-data"
+    service.beta.kubernetes.io/cvm-loadbalancer-healthcheck: "yes"
+spec:
+  type: LoadBalancer
+  selector:
+    app: postgresql
+  ports:
+    - name: postgresql
+      port: 5432
+      targetPort: 5432
+      protocol: TCP
+```
+
+## Verification and Testing
+
+### Verify Controller Installation
+
+```bash
+# Check controller pod
+kubectl get pods -n kube-system -l app=clb-controller-manager
+
+# Check logs
+kubectl logs -n kube-system -l app=clb-controller-manager -f
+
+# Verify RBAC
+kubectl get clusterrole,clusterrolebinding | grep clb
+```
+
+### Test LoadBalancer Service
+
+```bash
+# Create test service
+kubectl create deployment test-app --image=nginx
+kubectl expose deployment test-app --type=LoadBalancer --port=80 \
+  --annotations='service.beta.kubernetes.io/cvm-loadbalancer-name=test-lb' \
+  --annotations='service.beta.kubernetes.io/cvm-loadbalancer-type=internal' \
+  --annotations='service.beta.kubernetes.io/cvm-loadbalancer-subnet-id=subnet-xxxxxx'
+
+# Wait for external IP
+kubectl get svc test-app -w
+
+# Test connectivity (from within VPC)
+curl http://<EXTERNAL-IP>
+
+# Cleanup
+kubectl delete svc test-app
+kubectl delete deployment test-app
+```
+
+## Troubleshooting
+
+### Service Stuck in Pending
+
+1. Check controller logs:
+```bash
+kubectl logs -n kube-system -l app=clb-controller-manager --tail=50
+```
+
+2. Verify required annotations:
+```bash
+kubectl get svc <service-name> -o yaml | grep annotations -A 10
+```
+
+3. Check events:
+```bash
+kubectl describe svc <service-name>
+```
+
+### CLB Not Created
+
+Common issues:
+
+1. **Missing Required Annotations**: Ensure `loadBalancerName`, `subnetId`, and `type` are set
+2. **Invalid Subnet**: Verify subnet exists in the specified VPC and region
+3. **API Permission Issues**: Check credentials have CLB creation permissions
+4. **Quota Exceeded**: Check Tencent Cloud CLB quota limits
+
+### Backend Endpoints Not Syncing
+
+1. Check node registration:
+```bash
+kubectl get nodes -o wide
+```
+
+2. Verify nodePort allocation:
+```bash
+kubectl get svc <service-name> -o jsonpath='{.spec.ports[*].nodePort}'
+```
+
+3. Check endpoint controller:
+```bash
+kubectl get endpoints <service-name>
+```
+
+### Authentication Errors
+
+Verify secret configuration:
+```bash
+kubectl get secret -n kube-system | grep clb
+kubectl get secret <secret-name> -n kube-system -o yaml
+```
+
+Ensure API credentials have required permissions:
+- `clb:CreateLoadBalancer`
+- `clb:ModifyLoadBalancerAttributes`
+- `clb:DescribeLoadBalancers`
+- `clb:RegisterTargets`
+- `clb:DeregisterTargets`
+
+## Advanced Configuration
+
+### High Availability
+
+```yaml
+replicaCount: 2
+
+affinity:
+  podAntiAffinity:
+    preferredDuringSchedulingIgnoredDuringExecution:
+      - weight: 100
+        podAffinityTerm:
+          labelSelector:
+            matchLabels:
+              app: clb-controller-manager
+          topologyKey: kubernetes.io/hostname
+```
+
+### Resource Tagging
+
+Tag all CLBs for cost tracking:
+
+```yaml
+env:
+  clbTag: "environment=production,team=platform,cost-center=engineering,managed-by=kubernetes"
+```
+
+### Node Selector
+
+Run controller only on master nodes:
+
+```yaml
+nodeSelector:
+  node-role.kubernetes.io/master: ""
+
+tolerations:
+  - key: node-role.kubernetes.io/master
+    effect: NoSchedule
+```
+
+## Security Considerations
+
+<Warning>
+  The controller requires cluster-admin permissions to watch and update services. Secure the API credentials and restrict access to the controller namespace.
+</Warning>
+
+### RBAC Permissions
+
+The controller needs:
+- Read/write access to Services
+- Read access to Nodes and Endpoints
+- Create/update LoadBalancer resources
+
+### Network Security
+
+- Controller communicates with Tencent Cloud API endpoints
+- Requires access to `clb.internal.tencentcloudapi.com`
+- Uses `hostNetwork: true` for API connectivity
+
+### Secret Management
+
+```bash
+# Use sealed secrets or external secret managers
+kubectl create secret generic clb-secret \
+  --from-literal=secret_id="$SECRET_ID" \
+  --from-literal=secret_key="$SECRET_KEY" \
+  --dry-run=client -o yaml | \
+  kubeseal -o yaml > clb-sealed-secret.yaml
+```
+
+## Cost Management
+
+### CLB Pricing Considerations
+
+- CLB instances are charged hourly
+- Public CLBs incur bandwidth/traffic charges
+- Internal CLBs are typically less expensive
+- Idle CLBs still incur charges
+
+### Best Practices
+
+1. **Use Internal LBs**: When possible, use internal CLBs to save costs
+2. **Consolidate Services**: Use Ingress instead of multiple LoadBalancer services
+3. **Delete Unused LBs**: Clean up services to avoid idle CLB charges
+4. **Set Bandwidth Limits**: Configure appropriate bandwidth to control costs
+
+```bash
+# Find LoadBalancer services
+kubectl get svc -A --field-selector spec.type=LoadBalancer
+
+# Check CLB usage in Tencent Cloud console
+```
+
+## Uninstallation
+
+<Warning>
+  Uninstalling the controller does not automatically delete CLBs. Delete all LoadBalancer services first, or manually clean up CLBs in the Tencent Cloud console.
+</Warning>
+
+```bash
+# List all LoadBalancer services
+kubectl get svc -A --field-selector spec.type=LoadBalancer
+
+# Delete LoadBalancer services
+kubectl delete svc <service-name> -n <namespace>
+
+# Uninstall controller
+helm uninstall clb-manager --namespace kube-system
+
+# Verify CLBs are deleted in Tencent Cloud console
+```
+
+## Additional Resources
+
+- [Tencent Cloud CLB Documentation](https://cloud.tencent.com/document/product/214)
+- [Kubernetes Service Types](https://kubernetes.io/docs/concepts/services-networking/service/#loadbalancer)
+- [Cloud Provider Integration](https://kubernetes.io/docs/concepts/architecture/cloud-controller/)
+- [TKE Cloud Controller Manager](https://github.com/TencentCloud/tencentcloud-cloud-controller-manager)

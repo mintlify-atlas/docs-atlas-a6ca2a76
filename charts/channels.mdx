@@ -1,0 +1,251 @@
+---
+title: Channels
+description: Multi-protocol chat gateway service
+---
+
+Channels is a multi-protocol chat gateway that bridges IRC, Slack, and web interfaces.
+
+## Overview
+
+Channels provides a unified chat platform that connects different messaging protocols, allowing users to communicate across IRC and Slack using a single deployment.
+
+**Upstream project**: [https://github.com/everpcpc/channels](https://github.com/everpcpc/channels)
+
+## Installation
+
+<Steps>
+  <Step title="Create configuration secret">
+    Before installing, create a secret with your channels configuration:
+
+    ```bash
+    kubectl create secret generic channels-config \
+      --from-file=config.json=./config.json \
+      --namespace=default
+    ```
+
+    Example `config.json` structure:
+    ```json
+    {
+      "irc": {
+        "server": "irc.example.com",
+        "port": 6667
+      },
+      "slack": {
+        "token": "xoxb-your-token"
+      }
+    }
+    ```
+  </Step>
+
+  <Step title="Add the Helm repository">
+    ```bash
+    helm repo add douban https://douban.github.io/charts/
+    helm repo update
+    ```
+  </Step>
+
+  <Step title="Install the chart">
+    ```bash
+    helm install channels douban/channels
+    ```
+  </Step>
+</Steps>
+
+## Configuration
+
+### Required Secret
+
+Channels requires a secret named `channels-config` in the deployment namespace containing the application configuration:
+
+```yaml
+apiVersion: v1
+kind: Secret
+metadata:
+  name: channels-config
+  namespace: default
+type: Opaque
+data:
+  config.json: <base64-encoded-config>
+```
+
+### Web Service
+
+The web interface configuration:
+
+```yaml
+web:
+  replicaCount: 2
+  port: 8989
+  service:
+    type: ClusterIP
+    port: 8989
+    annotations: {}
+  resources:
+    limits:
+      cpu: 500m
+      memory: 512Mi
+    requests:
+      cpu: 100m
+      memory: 128Mi
+```
+
+### IRC Service
+
+Enable and configure the IRC gateway:
+
+```yaml
+irc:
+  enabled: true
+  replicaCount: 2
+  port: 6667
+  service:
+    type: ClusterIP
+    port: 6667
+  resources:
+    limits:
+      cpu: 200m
+      memory: 256Mi
+```
+
+### Slack Service
+
+Enable and configure the Slack integration:
+
+```yaml
+slack:
+  enabled: false  # Set to true to enable
+  replicaCount: 1
+  resources:
+    limits:
+      cpu: 200m
+      memory: 256Mi
+```
+
+## Access Configuration
+
+### Ingress
+
+```yaml
+ingress:
+  enabled: true
+  className: "nginx"
+  annotations:
+    cert-manager.io/cluster-issuer: "letsencrypt"
+  hosts:
+    - host: chat.example.com
+      paths:
+        - path: /
+          pathType: ImplementationSpecific
+  tls:
+    - secretName: channels-tls
+      hosts:
+        - chat.example.com
+```
+
+### Service Types
+
+For IRC, you may want to expose it via LoadBalancer:
+
+```yaml
+irc:
+  enabled: true
+  service:
+    type: LoadBalancer
+    port: 6667
+```
+
+## Example Values
+
+### Web-Only Deployment
+
+```yaml
+image:
+  repository: everpcpc/channels
+  tag: latest
+  pullPolicy: Always
+
+web:
+  replicaCount: 2
+  service:
+    type: ClusterIP
+    port: 8989
+
+irc:
+  enabled: false
+
+slack:
+  enabled: false
+
+ingress:
+  enabled: true
+  className: "nginx"
+  hosts:
+    - host: chat.example.com
+      paths:
+        - path: /
+          pathType: ImplementationSpecific
+```
+
+### Full Multi-Protocol Setup
+
+```yaml
+image:
+  repository: everpcpc/channels
+  tag: latest
+
+web:
+  replicaCount: 2
+  service:
+    type: ClusterIP
+    port: 8989
+  resources:
+    limits:
+      cpu: 500m
+      memory: 512Mi
+
+irc:
+  enabled: true
+  replicaCount: 2
+  service:
+    type: LoadBalancer
+    port: 6667
+  resources:
+    limits:
+      cpu: 200m
+      memory: 256Mi
+
+slack:
+  enabled: true
+  replicaCount: 1
+  resources:
+    limits:
+      cpu: 200m
+      memory: 256Mi
+
+ingress:
+  enabled: true
+  className: "nginx"
+  hosts:
+    - host: chat.example.com
+      paths:
+        - path: /
+          pathType: ImplementationSpecific
+```
+
+## Key Parameters
+
+| Parameter | Description | Default |
+|-----------|-------------|----------|
+| `image.repository` | Channels image repository | `everpcpc/channels` |
+| `image.tag` | Channels image tag | `latest` |
+| `web.replicaCount` | Number of web replicas | `2` |
+| `web.port` | Web service port | `8989` |
+| `irc.enabled` | Enable IRC gateway | `true` |
+| `irc.port` | IRC service port | `6667` |
+| `slack.enabled` | Enable Slack integration | `false` |
+
+## Important Notes
+
+- The `channels-config` secret must exist before deploying the chart
+- The secret must be in the same namespace as the deployment
+- Update the `pullPolicy` to `IfNotPresent` in production for stable tags

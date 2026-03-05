@@ -1,0 +1,563 @@
+---
+title: K8s Cron
+description: Scheduled maintenance tasks for Kubernetes clusters
+---
+
+K8s Cron provides a simple way to run scheduled maintenance tasks in your Kubernetes cluster using CronJobs with administrative permissions.
+
+## Overview
+
+K8s Cron enables:
+
+- **Scheduled Tasks**: Run kubectl commands on a schedule
+- **Cluster Maintenance**: Automate cleanup and maintenance operations
+- **Custom Scripts**: Execute bash scripts with cluster access
+- **RBAC Support**: Flexible Role or ClusterRole permissions
+
+The default configuration cleans up evicted pods, but it can be customized for any cluster maintenance task.
+
+## Prerequisites
+
+- Kubernetes cluster v1.21+
+- Helm 3.x
+- Basic understanding of Kubernetes RBAC
+- Knowledge of cron syntax
+
+<Warning>
+  By default, this chart creates a ClusterRole with permissions to delete pods across all namespaces. Review and customize RBAC permissions based on your security requirements.
+</Warning>
+
+## Installation
+
+### Basic Installation
+
+Install with default evicted pod cleanup:
+
+```bash
+helm repo add douban https://douban.github.io/charts/
+helm install k8s-cron douban/k8s-cron \
+  --namespace kube-system
+```
+
+### Custom Schedule
+
+Install with custom cron schedule:
+
+```bash
+helm install k8s-cron douban/k8s-cron \
+  --namespace kube-system \
+  --set schedule="0 2 * * *"  # Run at 2 AM daily
+```
+
+## Configuration
+
+### Essential Parameters
+
+| Parameter | Description | Default |
+|-----------|-------------|--------|
+| `schedule` | Cron schedule expression | `*/5 * * * *` (every 5 minutes) |
+| `script` | Bash script to execute | Evicted pod cleanup |
+| `image.repository` | Container image | `alpine/k8s` |
+| `image.tag` | Image tag | `1.28.2` |
+| `clusterRole.create` | Create ClusterRole | `true` |
+| `role.create` | Create namespaced Role | `false` |
+
+### Schedule Configuration
+
+Cron schedule format:
+```
+┌───────────── minute (0 - 59)
+│ ┌───────────── hour (0 - 23)
+│ │ ┌───────────── day of month (1 - 31)
+│ │ │ ┌───────────── month (1 - 12)
+│ │ │ │ ┌───────────── day of week (0 - 6) (Sunday to Saturday)
+│ │ │ │ │
+* * * * *
+```
+
+Examples:
+- `*/5 * * * *` - Every 5 minutes
+- `0 * * * *` - Every hour
+- `0 2 * * *` - Daily at 2 AM
+- `0 2 * * 0` - Weekly on Sunday at 2 AM
+- `0 0 1 * *` - Monthly on the 1st at midnight
+
+### Script Configuration
+
+Custom cleanup script:
+
+```yaml
+script: |
+  #!/bin/bash
+  echo "Starting cluster maintenance at $(date)"
+  
+  # Your custom logic here
+  for namespace in $(kubectl get namespace -o=json | jq -r '.items[].metadata.name'); do
+    echo "Processing namespace: ${namespace}"
+    
+    # Example: cleanup evicted pods
+    kubectl -n ${namespace} get pod -o=json | \
+      jq '[.items[] | select(.status.reason=="Evicted")] | sort_by(.status.startTime) | .[0:-3]' | \
+      jq -r '.[].metadata.name' | \
+      xargs --no-run-if-empty kubectl -n ${namespace} delete pod
+  done
+  
+  echo "Maintenance completed at $(date)"
+
+command: ["/bin/bash"]
+args: ["-c", "/scripts/run.sh"]
+```
+
+### RBAC Configuration
+
+#### ClusterRole (Cluster-Wide Access)
+
+```yaml
+clusterRole:
+  create: true
+  annotations: {}
+  roles:
+    - apiGroups: [""]
+      resources: ["pods"]
+      verbs: ["get", "list", "delete"]
+    - apiGroups: [""]
+      resources: ["namespaces"]
+      verbs: ["get", "list"]
+```
+
+#### Namespaced Role
+
+```yaml
+clusterRole:
+  create: false
+
+role:
+  create: true
+  annotations: {}
+  roles:
+    - apiGroups: [""]
+      resources: ["pods"]
+      verbs: ["get", "list", "delete"]
+```
+
+### Resource Configuration
+
+```yaml
+resources:
+  limits:
+    cpu: 500m
+    memory: 256Mi
+  requests:
+    cpu: 100m
+    memory: 128Mi
+
+nodeSelector:
+  kubernetes.io/os: linux
+
+tolerations:
+  - key: node-role.kubernetes.io/master
+    effect: NoSchedule
+
+affinity: {}
+```
+
+## Real-World Examples
+
+### Example 1: Cleanup Evicted Pods (Default)
+
+```bash
+helm install pod-cleanup douban/k8s-cron \
+  --namespace kube-system \
+  --set schedule="*/10 * * * *"
+```
+
+This runs every 10 minutes and:
+1. Finds all evicted pods in every namespace
+2. Sorts by creation time
+3. Deletes all but the 3 most recent evicted pods
+
+### Example 2: Daily Node Resource Report
+
+```yaml
+helm install node-report douban/k8s-cron \
+  --namespace kube-system \
+  --set schedule="0 8 * * *" \
+  --set-file script=custom-script.sh
+```
+
+`custom-script.sh`:
+```bash
+#!/bin/bash
+echo "=== Daily Node Resource Report ==="
+echo "Date: $(date)"
+echo ""
+
+echo "Node Status:"
+kubectl get nodes -o wide
+
+echo ""
+echo "Node Resource Usage:"
+kubectl top nodes
+
+echo ""
+echo "Pods per Node:"
+for node in $(kubectl get nodes -o jsonpath='{.items[*].metadata.name}'); do
+  count=$(kubectl get pods --all-namespaces --field-selector spec.nodeName=$node -o json | jq '.items | length')
+  echo "$node: $count pods"
+done
+
+# Send to logging system or notification
+```
+
+### Example 3: Cleanup Completed Jobs
+
+```yaml
+schedule: "0 */6 * * *"  # Every 6 hours
+
+script: |
+  #!/bin/bash
+  echo "Cleaning up completed jobs"
+  
+  # Delete completed jobs older than 24 hours
+  kubectl get jobs --all-namespaces -o json | \
+    jq -r '.items[] | select(.status.succeeded==1) | select(.status.completionTime < (now - 86400 | todate)) | "\(.metadata.namespace) \(.metadata.name)"' | \
+    while read namespace job; do
+      echo "Deleting job $job in namespace $namespace"
+      kubectl delete job -n $namespace $job
+    done
+
+clusterRole:
+  roles:
+    - apiGroups: ["batch"]
+      resources: ["jobs"]
+      verbs: ["get", "list", "delete"]
+    - apiGroups: [""]
+      resources: ["namespaces"]
+      verbs: ["get", "list"]
+```
+
+### Example 4: Certificate Expiry Check
+
+```yaml
+schedule: "0 0 * * *"  # Daily at midnight
+
+script: |
+  #!/bin/bash
+  echo "Checking certificate expiry"
+  
+  # Find all TLS secrets
+  kubectl get secrets --all-namespaces -o json | \
+    jq -r '.items[] | select(.type=="kubernetes.io/tls") | "\(.metadata.namespace) \(.metadata.name)"' | \
+    while read namespace secret; do
+      # Get certificate
+      cert=$(kubectl get secret -n $namespace $secret -o jsonpath='{.data.tls\.crt}' | base64 -d)
+      
+      # Check expiry
+      expiry=$(echo "$cert" | openssl x509 -noout -enddate | cut -d= -f2)
+      expiry_epoch=$(date -d "$expiry" +%s)
+      current_epoch=$(date +%s)
+      days_until_expiry=$(( ($expiry_epoch - $current_epoch) / 86400 ))
+      
+      if [ $days_until_expiry -lt 30 ]; then
+        echo "WARNING: Certificate $secret in $namespace expires in $days_until_expiry days"
+      fi
+    done
+
+clusterRole:
+  roles:
+    - apiGroups: [""]
+      resources: ["secrets"]
+      verbs: ["get", "list"]
+    - apiGroups: [""]
+      resources: ["namespaces"]
+      verbs: ["get", "list"]
+```
+
+### Example 5: Image Cleanup in Development
+
+```yaml
+schedule: "0 3 * * 0"  # Weekly on Sunday at 3 AM
+
+script: |
+  #!/bin/bash
+  echo "Cleaning up old development images"
+  
+  # Find pods using old image tags
+  kubectl get pods -n development -o json | \
+    jq -r '.items[] | select(.spec.containers[].image | contains(":dev-")) | .metadata.name' | \
+    while read pod; do
+      # Check pod age
+      created=$(kubectl get pod -n development $pod -o jsonpath='{.metadata.creationTimestamp}')
+      created_epoch=$(date -d "$created" +%s)
+      current_epoch=$(date +%s)
+      age_days=$(( ($current_epoch - $created_epoch) / 86400 ))
+      
+      if [ $age_days -gt 7 ]; then
+        echo "Deleting old dev pod: $pod (age: $age_days days)"
+        kubectl delete pod -n development $pod
+      fi
+    done
+
+role:
+  create: true
+  roles:
+    - apiGroups: [""]
+      resources: ["pods"]
+      verbs: ["get", "list", "delete"]
+
+clusterRole:
+  create: false
+```
+
+### Example 6: PVC Cleanup
+
+```yaml
+schedule: "0 4 * * *"  # Daily at 4 AM
+
+script: |
+  #!/bin/bash
+  echo "Checking for unused PVCs"
+  
+  for namespace in $(kubectl get namespace -o jsonpath='{.items[*].metadata.name}'); do
+    kubectl get pvc -n $namespace -o json | \
+      jq -r '.items[] | select(.status.phase=="Bound") | .metadata.name' | \
+      while read pvc; do
+        # Check if PVC is used by any pod
+        used=$(kubectl get pods -n $namespace -o json | \
+          jq -r --arg pvc "$pvc" '.items[] | select(.spec.volumes[]?.persistentVolumeClaim.claimName==$pvc) | .metadata.name')
+        
+        if [ -z "$used" ]; then
+          echo "Unused PVC found: $pvc in namespace $namespace"
+          # Uncomment to actually delete:
+          # kubectl delete pvc -n $namespace $pvc
+        fi
+      done
+  done
+
+clusterRole:
+  roles:
+    - apiGroups: [""]
+      resources: ["persistentvolumeclaims", "pods"]
+      verbs: ["get", "list", "delete"]
+    - apiGroups: [""]
+      resources: ["namespaces"]
+      verbs: ["get", "list"]
+```
+
+## Monitoring and Verification
+
+### Check CronJob Status
+
+```bash
+# Get CronJob
+kubectl get cronjob -n kube-system
+
+# Describe CronJob
+kubectl describe cronjob k8s-cron -n kube-system
+
+# View schedule and last execution
+kubectl get cronjob k8s-cron -n kube-system -o yaml | grep -A 5 schedule
+```
+
+### View Job Execution History
+
+```bash
+# List jobs created by CronJob
+kubectl get jobs -n kube-system -l app.kubernetes.io/name=k8s-cron
+
+# View recent job logs
+kubectl logs -n kube-system -l app.kubernetes.io/name=k8s-cron --tail=100
+
+# Get last 5 job executions
+kubectl get jobs -n kube-system -l app.kubernetes.io/name=k8s-cron --sort-by=.status.startTime | tail -5
+```
+
+### Manual Trigger
+
+```bash
+# Create a one-time job from CronJob
+kubectl create job -n kube-system manual-cleanup --from=cronjob/k8s-cron
+
+# Watch job execution
+kubectl logs -n kube-system -l job-name=manual-cleanup -f
+
+# Cleanup
+kubectl delete job -n kube-system manual-cleanup
+```
+
+## Troubleshooting
+
+### CronJob Not Running
+
+1. Check CronJob status:
+```bash
+kubectl get cronjob k8s-cron -n kube-system -o yaml
+```
+
+2. Verify schedule syntax:
+```bash
+kubectl describe cronjob k8s-cron -n kube-system | grep Schedule
+```
+
+3. Check for suspended state:
+```bash
+kubectl patch cronjob k8s-cron -n kube-system -p '{"spec":{"suspend":false}}'
+```
+
+### Script Failures
+
+1. View job logs:
+```bash
+kubectl logs -n kube-system -l app.kubernetes.io/name=k8s-cron --tail=50
+```
+
+2. Check RBAC permissions:
+```bash
+kubectl auth can-i list pods --as=system:serviceaccount:kube-system:k8s-cron -A
+```
+
+3. Test script manually:
+```bash
+kubectl create job test-script -n kube-system --from=cronjob/k8s-cron
+kubectl logs -n kube-system -l job-name=test-script -f
+kubectl delete job test-script -n kube-system
+```
+
+### Permission Denied
+
+Verify ServiceAccount and RBAC:
+```bash
+kubectl get sa k8s-cron -n kube-system
+kubectl get clusterrole k8s-cron -o yaml
+kubectl get clusterrolebinding k8s-cron -o yaml
+```
+
+Add missing permissions:
+```bash
+helm upgrade k8s-cron douban/k8s-cron \
+  --namespace kube-system \
+  --set clusterRole.roles[2].apiGroups={"batch"} \
+  --set clusterRole.roles[2].resources={"jobs"} \
+  --set clusterRole.roles[2].verbs={"get","list","delete"}
+```
+
+### Job History Retention
+
+Configure job history limits:
+```yaml
+# In CronJob spec
+successfulJobsHistoryLimit: 3
+failedJobsHistoryLimit: 1
+```
+
+## Best Practices
+
+### 1. Test Scripts Before Deployment
+
+Always test destructive operations:
+```bash
+# Add dry-run or echo to test logic first
+echo "Would delete pod: $pod"
+# kubectl delete pod $pod
+```
+
+### 2. Add Logging and Notifications
+
+```bash
+#!/bin/bash
+LOGFILE="/tmp/cleanup-$(date +%Y%m%d-%H%M%S).log"
+exec > >(tee -a $LOGFILE)
+exec 2>&1
+
+echo "Starting cleanup at $(date)"
+# Your script logic
+echo "Completed cleanup at $(date)"
+
+# Send notification (if webhook available)
+# curl -X POST https://hooks.slack.com/... -d '{"text":"Cleanup completed"}'
+```
+
+### 3. Use Idempotent Operations
+
+Ensure scripts can run multiple times safely:
+```bash
+# Check before delete
+if kubectl get pod $pod &>/dev/null; then
+  kubectl delete pod $pod
+fi
+```
+
+### 4. Set Resource Limits
+
+```yaml
+resources:
+  limits:
+    cpu: 200m
+    memory: 128Mi
+  requests:
+    cpu: 50m
+    memory: 64Mi
+```
+
+### 5. Use Appropriate Schedule
+
+- Avoid peak hours for intensive operations
+- Consider cluster timezone
+- Use appropriate frequency for task
+
+## Security Considerations
+
+<Warning>
+  The default configuration grants cluster-wide pod deletion permissions. Always follow the principle of least privilege and scope permissions to specific namespaces when possible.
+</Warning>
+
+### Namespace-Scoped Permissions
+
+```yaml
+clusterRole:
+  create: false
+
+role:
+  create: true
+  roles:
+    - apiGroups: [""]
+      resources: ["pods"]
+      verbs: ["get", "list", "delete"]
+```
+
+Then create RoleBindings per namespace:
+```bash
+kubectl create rolebinding k8s-cron-binding \
+  --role=k8s-cron \
+  --serviceaccount=kube-system:k8s-cron \
+  --namespace=target-namespace
+```
+
+### Audit Logging
+
+Enable audit logs for maintenance operations:
+```yaml
+script: |
+  #!/bin/bash
+  echo "[$(date -u +%Y-%m-%dT%H:%M:%SZ)] Starting maintenance"
+  # Operations with logging
+  echo "[$(date -u +%Y-%m-%dT%H:%M:%SZ)] Completed maintenance"
+```
+
+## Uninstallation
+
+```bash
+# Uninstall the chart
+helm uninstall k8s-cron --namespace kube-system
+
+# Verify removal
+kubectl get cronjob -n kube-system
+kubectl get clusterrole,clusterrolebinding | grep k8s-cron
+```
+
+## Additional Resources
+
+- [Kubernetes CronJobs](https://kubernetes.io/docs/concepts/workloads/controllers/cron-jobs/)
+- [Cron Syntax](https://crontab.guru/)
+- [Alpine K8s Image](https://github.com/alpine-docker/k8s)
+- [kubectl Command Reference](https://kubernetes.io/docs/reference/kubectl/)

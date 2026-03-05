@@ -1,0 +1,247 @@
+---
+title: Qiniu Exporter
+description: Export Qiniu Cloud Storage metrics to Prometheus
+---
+
+The Qiniu Exporter chart deploys a Prometheus exporter for [Qiniu Cloud](https://www.qiniu.com/) object storage and CDN services, enabling monitoring of storage usage, bandwidth, and request metrics.
+
+## What It Monitors
+
+This exporter collects metrics from Qiniu Cloud services:
+
+- Object Storage (Kodo) - storage usage, requests, traffic
+- CDN - bandwidth, requests, cache hit ratios
+- Data processing operations
+- API request statistics
+
+## Installation
+
+### Prerequisites
+
+You need Qiniu Cloud API credentials (AccessKey and SecretKey).
+
+### Basic Installation
+
+```bash
+helm repo add douban https://douban.github.io/charts
+helm install qiniu-exporter douban/qiniu-exporter
+```
+
+## Authentication Configuration
+
+<Warning>
+  Never commit Qiniu Cloud credentials to version control. Always use Kubernetes secrets or external secret management.
+</Warning>
+
+### Using Environment Variables
+
+Configure credentials securely:
+
+```yaml
+extraEnvs:
+  - name: QINIU_ACCESS_KEY
+    valueFrom:
+      secretKeyRef:
+        name: qiniu-credentials
+        key: access-key
+  - name: QINIU_SECRET_KEY
+    valueFrom:
+      secretKeyRef:
+        name: qiniu-credentials
+        key: secret-key
+```
+
+<ParamField path="extraEnvs" type="array" default="[]">
+  Environment variables for credentials and configuration
+</ParamField>
+
+### Create Credentials Secret
+
+```bash
+kubectl create secret generic qiniu-credentials \
+  --from-literal=access-key="YOUR_ACCESS_KEY" \
+  --from-literal=secret-key="YOUR_SECRET_KEY"
+```
+
+## Configuration
+
+<ParamField path="args" type="array" default="[]">
+  Additional command-line arguments for the exporter
+</ParamField>
+
+<ParamField path="image.repository" type="string" default="ghcr.io/douban/qiniu-exporter">
+  Container image repository
+</ParamField>
+
+<ParamField path="image.tag" type="string" default="main">
+  Container image tag
+</ParamField>
+
+<ParamField path="containerPort" type="number" default="9270">
+  Port the exporter listens on
+</ParamField>
+
+<ParamField path="service.port" type="number" default="9270">
+  Service port to expose metrics
+</ParamField>
+
+## ServiceMonitor Configuration
+
+For automatic Prometheus scraping via the Prometheus Operator:
+
+```yaml
+serviceMonitor:
+  enabled: true
+  interval: 60s
+  labels:
+    prometheus: kube-prometheus
+```
+
+<ParamField path="serviceMonitor.enabled" type="boolean" default="false">
+  Enable ServiceMonitor resource creation
+</ParamField>
+
+<ParamField path="serviceMonitor.interval" type="string" default="30s">
+  Scrape interval (60s recommended for cloud APIs)
+</ParamField>
+
+<ParamField path="serviceMonitor.timeout" type="string" default="10s">
+  Scrape timeout
+</ParamField>
+
+## Manual Prometheus Configuration
+
+If not using the Prometheus Operator:
+
+```yaml
+scrape_configs:
+  - job_name: 'qiniu-exporter'
+    static_configs:
+      - targets: ['qiniu-exporter:9270']
+    scrape_interval: 60s
+    scrape_timeout: 30s
+```
+
+## Example Values
+
+```yaml
+replicaCount: 1
+
+image:
+  repository: ghcr.io/douban/qiniu-exporter
+  tag: "main"
+  pullPolicy: IfNotPresent
+
+extraEnvs:
+  - name: QINIU_ACCESS_KEY
+    valueFrom:
+      secretKeyRef:
+        name: qiniu-credentials
+        key: access-key
+  - name: QINIU_SECRET_KEY
+    valueFrom:
+      secretKeyRef:
+        name: qiniu-credentials
+        key: secret-key
+
+service:
+  type: ClusterIP
+  port: 9270
+
+serviceMonitor:
+  enabled: true
+  interval: 60s
+  timeout: 30s
+  labels:
+    release: prometheus
+
+resources:
+  limits:
+    cpu: 200m
+    memory: 256Mi
+  requests:
+    cpu: 100m
+    memory: 128Mi
+```
+
+## Metrics Exposed
+
+Metrics are available at the `/metrics` endpoint:
+
+- `qiniu_storage_size_bytes` - Total storage size in bytes by bucket
+- `qiniu_storage_count` - Total number of objects by bucket
+- `qiniu_bandwidth_bytes` - Bandwidth usage
+- `qiniu_requests_total` - Total API requests by type
+- `qiniu_cdn_traffic_bytes` - CDN traffic by domain
+- `qiniu_cdn_requests_total` - CDN requests by domain
+
+## Prometheus Rules
+
+Example alerting rules:
+
+```yaml
+prometheusRule:
+  enabled: true
+  rules:
+    - alert: QiniuHighStorageUsage
+      expr: qiniu_storage_size_bytes > 1000000000000  # 1TB
+      for: 5m
+      labels:
+        severity: warning
+      annotations:
+        summary: High Qiniu storage usage
+        description: "Bucket {{ $labels.bucket }} is using {{ $value | humanize }}B"
+    
+    - alert: QiniuHighBandwidth
+      expr: rate(qiniu_bandwidth_bytes[5m]) > 104857600  # 100MB/s
+      for: 10m
+      labels:
+        severity: warning
+      annotations:
+        summary: High Qiniu bandwidth usage
+        description: "Bandwidth usage is {{ $value | humanize }}B/s"
+```
+
+## Use Cases
+
+### Storage Monitoring
+
+Track storage growth over time:
+
+```promql
+# Storage growth rate
+rate(qiniu_storage_size_bytes[1d])
+
+# Object count by bucket
+sum by (bucket) (qiniu_storage_count)
+```
+
+### CDN Performance
+
+Monitor CDN performance and costs:
+
+```promql
+# CDN cache hit ratio
+sum(rate(qiniu_cdn_requests_total{status="hit"}[5m])) / 
+sum(rate(qiniu_cdn_requests_total[5m]))
+
+# Bandwidth by domain
+sum by (domain) (rate(qiniu_cdn_traffic_bytes[5m]))
+```
+
+## Security Best Practices
+
+<Warning>
+  Follow these security guidelines:
+</Warning>
+
+1. **Use read-only credentials** - Create API keys with minimal permissions
+2. **Rotate credentials** - Change API keys regularly
+3. **Use Kubernetes secrets** - Never hardcode credentials in values files
+4. **Network policies** - Restrict network access to the exporter
+5. **RBAC** - Limit which users can access the exporter service
+
+## Resources
+
+- [Qiniu Exporter GitHub](https://github.com/douban/qiniu-exporter)
+- [Qiniu Cloud Documentation](https://developer.qiniu.com/)

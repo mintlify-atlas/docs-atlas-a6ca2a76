@@ -1,0 +1,277 @@
+---
+title: Upyun Exporter
+description: Export Upyun CDN and storage metrics to Prometheus
+---
+
+The Upyun Exporter chart deploys a Prometheus exporter for [Upyun](https://www.upyun.com/) (又拍云) CDN and cloud storage services, enabling monitoring of bandwidth, storage, and request metrics.
+
+## What It Monitors
+
+This exporter collects metrics from Upyun services:
+
+- CDN - bandwidth, requests, cache performance
+- Cloud Storage - storage usage, requests, traffic
+- Image processing operations
+- Video processing metrics
+- API usage statistics
+
+## Installation
+
+### Prerequisites
+
+You need Upyun operator credentials (operator name and password) or API credentials.
+
+### Basic Installation
+
+```bash
+helm repo add douban https://douban.github.io/charts
+helm install upyun-exporter douban/upyun-exporter
+```
+
+## Authentication Configuration
+
+<Warning>
+  Never commit Upyun credentials to version control. Always use Kubernetes secrets or external secret management solutions.
+</Warning>
+
+### Using Environment Variables
+
+Configure credentials securely:
+
+```yaml
+extraEnvs:
+  - name: UPYUN_OPERATOR
+    valueFrom:
+      secretKeyRef:
+        name: upyun-credentials
+        key: operator
+  - name: UPYUN_PASSWORD
+    valueFrom:
+      secretKeyRef:
+        name: upyun-credentials
+        key: password
+  - name: UPYUN_SERVICE_NAME
+    value: "your-service-name"
+```
+
+<ParamField path="extraEnvs" type="array" default="[]">
+  Environment variables for credentials and configuration
+</ParamField>
+
+### Create Credentials Secret
+
+```bash
+kubectl create secret generic upyun-credentials \
+  --from-literal=operator="YOUR_OPERATOR_NAME" \
+  --from-literal=password="YOUR_OPERATOR_PASSWORD"
+```
+
+## Configuration
+
+<ParamField path="args" type="array" default="[]">
+  Additional command-line arguments for the exporter
+</ParamField>
+
+<ParamField path="image.repository" type="string" default="ghcr.io/douban/upyun-exporter">
+  Container image repository
+</ParamField>
+
+<ParamField path="image.tag" type="string" default="main">
+  Container image tag
+</ParamField>
+
+<ParamField path="containerPort" type="number" default="9300">
+  Port the exporter listens on
+</ParamField>
+
+<ParamField path="service.port" type="number" default="9300">
+  Service port to expose metrics
+</ParamField>
+
+## ServiceMonitor Configuration
+
+For automatic Prometheus scraping via the Prometheus Operator:
+
+```yaml
+serviceMonitor:
+  enabled: true
+  interval: 60s
+  labels:
+    prometheus: kube-prometheus
+```
+
+<ParamField path="serviceMonitor.enabled" type="boolean" default="false">
+  Enable ServiceMonitor resource creation
+</ParamField>
+
+<ParamField path="serviceMonitor.interval" type="string" default="30s">
+  Scrape interval (60s recommended for cloud APIs)
+</ParamField>
+
+<ParamField path="serviceMonitor.timeout" type="string" default="10s">
+  Scrape timeout
+</ParamField>
+
+## Manual Prometheus Configuration
+
+If not using the Prometheus Operator:
+
+```yaml
+scrape_configs:
+  - job_name: 'upyun-exporter'
+    static_configs:
+      - targets: ['upyun-exporter:9300']
+    scrape_interval: 60s
+    scrape_timeout: 30s
+```
+
+## Example Values
+
+```yaml
+replicaCount: 1
+
+image:
+  repository: ghcr.io/douban/upyun-exporter
+  tag: "main"
+  pullPolicy: IfNotPresent
+
+extraEnvs:
+  - name: UPYUN_OPERATOR
+    valueFrom:
+      secretKeyRef:
+        name: upyun-credentials
+        key: operator
+  - name: UPYUN_PASSWORD
+    valueFrom:
+      secretKeyRef:
+        name: upyun-credentials
+        key: password
+  - name: UPYUN_SERVICE_NAME
+    value: "my-cdn-service"
+
+service:
+  type: ClusterIP
+  port: 9300
+
+serviceMonitor:
+  enabled: true
+  interval: 60s
+  timeout: 30s
+  labels:
+    release: prometheus
+
+resources:
+  limits:
+    cpu: 200m
+    memory: 256Mi
+  requests:
+    cpu: 100m
+    memory: 128Mi
+```
+
+## Metrics Exposed
+
+Metrics are available at the `/metrics` endpoint:
+
+- `upyun_storage_size_bytes` - Total storage size in bytes
+- `upyun_storage_files_count` - Number of files stored
+- `upyun_bandwidth_bytes` - Bandwidth usage by service
+- `upyun_requests_total` - Total requests by type
+- `upyun_cdn_traffic_bytes` - CDN traffic
+- `upyun_cdn_hit_ratio` - CDN cache hit ratio
+- `upyun_image_processing_total` - Image processing operations
+
+## Prometheus Rules
+
+Example alerting rules:
+
+```yaml
+prometheusRule:
+  enabled: true
+  rules:
+    - alert: UpyunHighBandwidth
+      expr: rate(upyun_bandwidth_bytes[5m]) > 104857600  # 100MB/s
+      for: 10m
+      labels:
+        severity: warning
+      annotations:
+        summary: High Upyun bandwidth usage
+        description: "Service {{ $labels.service }} bandwidth is {{ $value | humanize }}B/s"
+    
+    - alert: UpyunLowCacheHitRatio
+      expr: upyun_cdn_hit_ratio < 0.8
+      for: 15m
+      labels:
+        severity: warning
+      annotations:
+        summary: Low CDN cache hit ratio
+        description: "CDN cache hit ratio is {{ $value | humanizePercentage }}"
+    
+    - alert: UpyunHighStorageUsage
+      expr: upyun_storage_size_bytes > 1000000000000  # 1TB
+      for: 5m
+      labels:
+        severity: info
+      annotations:
+        summary: High storage usage
+        description: "Storage usage is {{ $value | humanize }}B"
+```
+
+## Use Cases
+
+### CDN Performance Monitoring
+
+Monitor CDN performance and optimization:
+
+```promql
+# Cache hit ratio
+upyun_cdn_hit_ratio
+
+# Bandwidth by service
+sum by (service) (rate(upyun_bandwidth_bytes[5m]))
+
+# Request rate
+rate(upyun_requests_total[5m])
+```
+
+### Storage Monitoring
+
+Track storage growth and usage:
+
+```promql
+# Storage growth rate
+rate(upyun_storage_size_bytes[1d])
+
+# Files count trend
+delta(upyun_storage_files_count[1h])
+```
+
+### Cost Optimization
+
+Monitor metrics related to billing:
+
+```promql
+# Total bandwidth (impacts cost)
+sum(rate(upyun_bandwidth_bytes[1d]))
+
+# Image processing operations (may incur charges)
+rate(upyun_image_processing_total[1d])
+```
+
+## Security Best Practices
+
+<Warning>
+  Follow these security guidelines:
+</Warning>
+
+1. **Use dedicated operator** - Create a separate operator account for monitoring
+2. **Read-only permissions** - Grant only necessary read permissions
+3. **Rotate credentials** - Change operator passwords regularly
+4. **Use Kubernetes secrets** - Never hardcode credentials in values files
+5. **Network policies** - Restrict network access to the exporter
+6. **Audit access** - Monitor who accesses the exporter metrics
+
+## Resources
+
+- [Upyun Exporter GitHub](https://github.com/douban/upyun-exporter)
+- [Upyun Documentation](https://help.upyun.com/)

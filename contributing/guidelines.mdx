@@ -1,0 +1,209 @@
+---
+title: Contributing Guidelines
+description: How to contribute to the Douban Helm Charts repository
+---
+
+We welcome contributions to the Douban Helm Charts repository! This guide will help you get started with contributing bug fixes, new charts, or improvements to existing charts.
+
+## Code of Conduct
+
+This project follows the [CNCF Code of Conduct](https://github.com/cncf/foundation/blob/master/code-of-conduct.md). By participating, you are expected to uphold this code.
+
+## Ways to Contribute
+
+There are several ways you can contribute to this project:
+
+- **Report bugs**: Open an issue describing the bug and how to reproduce it
+- **Suggest enhancements**: Propose new features or improvements to existing charts
+- **Submit pull requests**: Fix bugs, add new charts, or improve documentation
+- **Improve documentation**: Help make our documentation clearer and more comprehensive
+
+## Pull Request Process
+
+<Steps>
+  <Step title="Fork and Clone">
+    Fork the repository and clone it to your local machine:
+    
+    ```bash
+    git clone https://github.com/YOUR_USERNAME/charts.git
+    cd charts
+    ```
+  </Step>
+
+  <Step title="Create a Branch">
+    Create a new branch for your changes:
+    
+    ```bash
+    git checkout -b feature/my-new-chart
+    ```
+  </Step>
+
+  <Step title="Make Your Changes">
+    Make your changes following the [chart development guidelines](/contributing/chart-development).
+  </Step>
+
+  <Step title="Test Your Changes">
+    Ensure your changes pass all linting and testing requirements (see [Testing Requirements](#testing-requirements)).
+  </Step>
+
+  <Step title="Commit and Push">
+    Commit your changes with a clear, descriptive commit message:
+    
+    ```bash
+    git add .
+    git commit -m "feat: add new chart for application X"
+    git push origin feature/my-new-chart
+    ```
+  </Step>
+
+  <Step title="Open a Pull Request">
+    Open a pull request against the `master` branch with a clear description of your changes.
+  </Step>
+</Steps>
+
+## Testing Requirements
+
+All chart changes must pass automated testing before being merged. The CI/CD pipeline uses [chart-testing (ct)](https://github.com/helm/chart-testing) to validate charts.
+
+### Automated Testing
+
+When you open a pull request, the following automated checks will run:
+
+#### Linting
+
+The `ct lint` command validates your chart against best practices:
+
+```bash
+ct lint --target-branch master --config ct.yaml
+```
+
+This checks:
+- Chart.yaml structure and required fields
+- values.yaml formatting
+- Template syntax
+- Kubernetes resource specifications
+- Version increments (chart version must be bumped)
+
+#### Chart Testing Configuration
+
+The repository uses the following chart-testing configuration (from `ct.yaml`):
+
+```yaml
+remote: origin
+chart-dirs:
+  - charts
+chart-repos:
+  - stable=https://charts.helm.sh/stable/
+  - douban=https://douban.github.io/charts/
+  - bitnami=https://raw.githubusercontent.com/bitnami/charts/archive-full-index/bitnami
+  - timescale=https://charts.timescale.com/
+helm-extra-args: --timeout 600s
+```
+
+### Local Testing
+
+Before submitting a pull request, test your charts locally:
+
+<Steps>
+  <Step title="Install chart-testing">
+    ```bash
+    pip install yamllint yamale
+    # Or use the ct Docker image
+    ```
+  </Step>
+
+  <Step title="Run linting locally">
+    ```bash
+    ct lint --chart-dirs charts --charts charts/YOUR_CHART
+    ```
+  </Step>
+
+  <Step title="Test installation">
+    ```bash
+    helm install test-release charts/YOUR_CHART
+    helm test test-release
+    helm uninstall test-release
+    ```
+  </Step>
+</Steps>
+
+## Chart Requirements
+
+All charts submitted to this repository must meet the following requirements:
+
+### Required Files
+
+- `Chart.yaml`: Chart metadata
+- `values.yaml`: Default configuration values
+- `README.md`: Chart documentation
+- `templates/`: Directory containing Kubernetes manifests
+- `templates/_helpers.tpl`: Template helpers
+
+### Chart.yaml Requirements
+
+```yaml
+apiVersion: v2
+name: my-chart
+version: 0.1.0  # Chart version (must increment with each change)
+appVersion: "1.0.0"  # Application version
+description: A clear description of what this chart does
+home: https://example.com  # Project homepage
+maintainers:
+  - name: Your Name
+type: application
+```
+
+### Version Increments
+
+<Warning>
+  **Important**: You must increment the `version` field in `Chart.yaml` for every change to the chart. The CI pipeline will fail if the version is not bumped.
+</Warning>
+
+Follow [Semantic Versioning](https://semver.org/):
+- **Major** (1.0.0 → 2.0.0): Breaking changes
+- **Minor** (1.0.0 → 1.1.0): New features, backward compatible
+- **Patch** (1.0.0 → 1.0.1): Bug fixes, backward compatible
+
+## Commit Message Guidelines
+
+Use clear, descriptive commit messages following conventional commits:
+
+- `feat: add new chart for nginx`
+- `fix: correct service port in redis chart`
+- `docs: update README for kafka-ui chart`
+- `chore: bump chart version to 0.2.0`
+
+## Review Process
+
+Once you submit a pull request:
+
+1. **Automated checks** will run (linting, testing)
+2. **Maintainer review**: A project maintainer will review your changes
+3. **Feedback**: Address any feedback or requested changes
+4. **Approval**: Once approved, your PR will be merged
+5. **Release**: Charts are automatically released when merged to `master`
+
+## Release Process
+
+The release process is fully automated:
+
+1. When a PR is merged to `master`, the release workflow is triggered
+2. [chart-releaser](https://github.com/helm/chart-releaser) packages changed charts
+3. Chart packages are uploaded to GitHub Releases
+4. The `index.yaml` is updated in the `gh-pages` branch
+5. Charts become available in the Helm repository
+
+You don't need to manually trigger releases - just merge to `master`!
+
+## Getting Help
+
+If you need help with contributing:
+
+- Open an issue with your question
+- Check existing issues and pull requests for similar problems
+- Review the [Chart Development Guide](/contributing/chart-development)
+- Consult the [Helm documentation](https://helm.sh/docs/)
+
+## License
+
+By contributing to this project, you agree that your contributions will be licensed under the same license as the project.

@@ -1,0 +1,173 @@
+---
+title: NGINX
+description: Deploy NGINX web server on Kubernetes
+---
+
+The NGINX chart deploys the popular NGINX web server on Kubernetes. NGINX is a high-performance HTTP server, reverse proxy, and IMAP/POP3 proxy server known for its high performance, stability, rich feature set, simple configuration, and low resource consumption.
+
+## What It Deploys
+
+This chart deploys:
+- NGINX web server (version 1.16.0)
+- Service for HTTP traffic
+- Optional Ingress or HTTPRoute for external access
+- Optional ServiceMonitor for Prometheus monitoring
+- Optional PrometheusRule for alerting
+
+## Installation
+
+```bash
+helm repo add douban https://douban.github.io/charts/
+helm install my-nginx douban/nginx
+```
+
+## Key Configuration Parameters
+
+<ParamField path="replicaCount" type="number" default="1">
+  Number of NGINX replicas to deploy
+</ParamField>
+
+<ParamField path="image.repository" type="string" default="nginx">
+  NGINX Docker image repository
+</ParamField>
+
+<ParamField path="image.tag" type="string" default="">
+  Overrides the image tag (defaults to chart appVersion: 1.16.0)
+</ParamField>
+
+<ParamField path="service.type" type="string" default="ClusterIP">
+  Kubernetes service type (ClusterIP, NodePort, or LoadBalancer)
+</ParamField>
+
+<ParamField path="service.port" type="number" default="80">
+  Service port for HTTP traffic
+</ParamField>
+
+<ParamField path="containerPort" type="number" default="80">
+  Container port NGINX listens on
+</ParamField>
+
+<ParamField path="ingress.enabled" type="boolean" default="false">
+  Enable Ingress resource for external access
+</ParamField>
+
+<ParamField path="httpRoute.enabled" type="boolean" default="false">
+  Enable HTTPRoute resource for Gateway API routing
+</ParamField>
+
+<ParamField path="volumes" type="array" default="[]">
+  Additional volumes to mount (for custom configs or static content)
+</ParamField>
+
+<ParamField path="volumeMounts" type="array" default="[]">
+  Volume mount paths for the NGINX container
+</ParamField>
+
+<ParamField path="env" type="array" default="[]">
+  Environment variables for NGINX container
+</ParamField>
+
+## Example Configurations
+
+### Basic Deployment with Ingress
+
+```yaml
+replicaCount: 2
+
+ingress:
+  enabled: true
+  className: "nginx"
+  hosts:
+    - host: www.example.com
+      paths:
+        - path: /
+          pathType: Prefix
+
+resources:
+  limits:
+    cpu: 200m
+    memory: 256Mi
+  requests:
+    cpu: 100m
+    memory: 128Mi
+```
+
+### Custom Configuration with ConfigMap
+
+```yaml
+volumes:
+  - name: nginx-config
+    configMap:
+      name: my-nginx-config
+
+volumeMounts:
+  - name: nginx-config
+    mountPath: /etc/nginx/nginx.conf
+    subPath: nginx.conf
+```
+
+### With Gateway API HTTPRoute
+
+```yaml
+httpRoute:
+  enabled: true
+  gatewayRef:
+    name: envoy-gateway-bundle
+    namespace: envoy-gateway-system
+  reuseIngressConfiguration: false
+  hostnames:
+    - www.example.com
+```
+
+<Accordion title="Monitoring Configuration">
+
+### Prometheus ServiceMonitor
+
+Enable Prometheus monitoring:
+
+```yaml
+serviceMonitor:
+  enabled: true
+```
+
+### Prometheus Rules
+
+Enable alerting rules:
+
+```yaml
+prometheusRule:
+  enabled: true
+  namespace: monitoring
+  additionalLabels:
+    release: prometheus-operator
+  rules:
+    - alert: NginxDown
+      expr: up{job="nginx"} == 0
+      for: 5m
+      labels:
+        severity: critical
+      annotations:
+        summary: "NGINX is down"
+```
+
+</Accordion>
+
+<Accordion title="Autoscaling">
+
+Enable horizontal pod autoscaling:
+
+```yaml
+autoscaling:
+  enabled: true
+  minReplicas: 2
+  maxReplicas: 10
+  targetCPUUtilizationPercentage: 80
+  targetMemoryUtilizationPercentage: 80
+```
+
+</Accordion>
+
+## Links
+
+- [NGINX Official Website](https://nginx.org/)
+- [Chart Source](https://github.com/douban/charts)

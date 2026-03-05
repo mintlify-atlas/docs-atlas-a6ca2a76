@@ -1,0 +1,307 @@
+---
+title: goInception
+description: MySQL SQL audit and execution platform
+---
+
+goInception is a MySQL operations tool that integrates SQL auditing, execution, backup, and rollback statement generation.
+
+## Overview
+
+goInception (一个集审核、执行、备份及生成回滚语句于一身的MySQL运维工具) provides comprehensive SQL auditing and execution capabilities for MySQL databases, helping teams maintain SQL quality standards and track database changes.
+
+**Upstream project**: [https://github.com/hanchuanchuan/goInception](https://github.com/hanchuanchuan/goInception)
+
+## Installation
+
+```bash
+helm repo add douban https://douban.github.io/charts/
+helm repo update
+helm install goinception douban/goinception
+```
+
+## Configuration
+
+### Basic Configuration
+
+```yaml
+image:
+  repository: hanchuanchuan/goinception
+  tag: latest
+  pullPolicy: IfNotPresent
+
+service:
+  type: ClusterIP
+  port: 4000
+  targetPort: 4000
+```
+
+### Backup Database Configuration
+
+Configure where goInception stores SQL backup data:
+
+```yaml
+initEnv:
+  - name: BACKUP_HOST
+    value: "mysql-backup-host"
+  - name: BACKUP_PORT
+    value: "3306"
+  - name: BACKUP_USER
+    value: "backup_user"
+  - name: BACKUP_PASSWORD
+    value: "backup_password"
+```
+
+### SQL Audit Rules
+
+Customize SQL checking rules via the configuration template:
+
+```yaml
+configMap:
+  enabled: true
+  data:
+    config.toml.template: |-
+      host="0.0.0.0"
+      port=4000
+      
+      [inc]
+      # Check rules
+      check_autoincrement_datatype=true
+      check_column_comment=true
+      check_table_comment=true
+      check_primary_key=true
+      
+      # Enable features
+      enable_blob_type=true
+      enable_drop_table=true
+      enable_fingerprint=true
+      
+      # Limits
+      max_keys=5
+      max_update_rows=5000
+      max_insert_rows=1000
+      
+      # Backup configuration
+      backup_host="BACKUP_HOST_PLACEHOLDER"
+      backup_port=BACKUP_PORT_PLACEHOLDER
+      backup_user="BACKUP_USER_PLACEHOLDER"
+      backup_password="BACKUP_PASSWORD_PLACEHOLDER"
+      
+      # Language
+      lang="zh-CN"  # or "en-US"
+      
+      [inc_level]
+      # Error levels: 0=ignore, 1=warning, 2=error
+      er_table_must_have_comment=2
+      er_column_have_no_comment=2
+      er_table_must_have_pk=2
+```
+
+### Online Schema Change Tools
+
+#### pt-online-schema-change
+
+```yaml
+configMap:
+  data:
+    config.toml.template: |-
+      [osc]
+      osc_on=false
+      osc_min_table_size=16  # MB
+      osc_bin_dir="/usr/local/bin"
+```
+
+#### gh-ost
+
+```yaml
+configMap:
+  data:
+    config.toml.template: |-
+      [ghost]
+      ghost_on=false
+      ghost_allow_on_master=true
+      ghost_assume_rbr=true
+      ghost_chunk_size=1000
+      ghost_max_lag_millis=1500
+```
+
+## Audit Rule Levels
+
+Configure the severity of different rule violations:
+
+```yaml
+configMap:
+  data:
+    config.toml.template: |-
+      [inc_level]
+      # 0 = Ignore
+      # 1 = Warning
+      # 2 = Error (blocks execution)
+      er_cant_set_engine=2
+      er_table_must_have_comment=2
+      er_column_have_no_comment=2
+      er_table_must_have_pk=2
+      er_index_name_idx_prefix=1
+      er_autoinc_unsigned=2
+```
+
+## Example Values
+
+### Minimal Setup
+
+```yaml
+image:
+  repository: hanchuanchuan/goinception
+  tag: latest
+
+service:
+  type: ClusterIP
+  port: 4000
+
+initEnv:
+  - name: BACKUP_HOST
+    value: "mysql-backup.default.svc.cluster.local"
+  - name: BACKUP_PORT
+    value: "3306"
+  - name: BACKUP_USER
+    value: "backup"
+  - name: BACKUP_PASSWORD
+    value: "backup123"
+```
+
+### Production Setup with Custom Rules
+
+```yaml
+image:
+  repository: hanchuanchuan/goinception
+  tag: latest
+
+service:
+  type: ClusterIP
+  port: 4000
+
+initEnv:
+  - name: BACKUP_HOST
+    valueFrom:
+      secretKeyRef:
+        name: goinception-backup
+        key: host
+  - name: BACKUP_PORT
+    value: "3306"
+  - name: BACKUP_USER
+    valueFrom:
+      secretKeyRef:
+        name: goinception-backup
+        key: user
+  - name: BACKUP_PASSWORD
+    valueFrom:
+      secretKeyRef:
+        name: goinception-backup
+        key: password
+
+configMap:
+  enabled: true
+  data:
+    config.toml.template: |-
+      host="0.0.0.0"
+      port=4000
+      
+      [inc]
+      # Strict checking
+      check_column_comment=true
+      check_table_comment=true
+      check_primary_key=true
+      check_autoincrement_name=true
+      
+      # Prevent dangerous operations
+      enable_drop_database=false
+      enable_drop_table=false
+      
+      # Limits
+      max_update_rows=1000
+      max_insert_rows=500
+      max_keys=5
+      
+      # Backup settings
+      backup_host="BACKUP_HOST_PLACEHOLDER"
+      backup_port=BACKUP_PORT_PLACEHOLDER
+      backup_user="BACKUP_USER_PLACEHOLDER"
+      backup_password="BACKUP_PASSWORD_PLACEHOLDER"
+      
+      lang="zh-CN"
+      enable_sql_statistic=true
+      
+      [inc_level]
+      er_table_must_have_comment=2
+      er_column_have_no_comment=2
+      er_table_must_have_pk=2
+      
+      [ghost]
+      ghost_on=true
+      ghost_allow_on_master=false
+      ghost_chunk_size=1000
+
+resources:
+  limits:
+    cpu: 1000m
+    memory: 1Gi
+  requests:
+    cpu: 200m
+    memory: 256Mi
+```
+
+## Key Parameters
+
+| Parameter | Description | Default |
+|-----------|-------------|----------|
+| `image.repository` | goInception image | `hanchuanchuan/goinception` |
+| `image.tag` | Image tag | `latest` |
+| `service.port` | Service port | `4000` |
+| `initEnv` | Backup database configuration | `[]` |
+| `configMap.enabled` | Enable configuration | `true` |
+
+## Common Check Rules
+
+| Rule | Description |
+|------|-------------|
+| `check_table_comment` | Require table comments |
+| `check_column_comment` | Require column comments |
+| `check_primary_key` | Require primary key |
+| `check_autoincrement_name` | Validate auto-increment naming |
+| `check_dml_limit` | Check for LIMIT in DML |
+| `check_dml_where` | Require WHERE in DML |
+| `enable_drop_database` | Allow DROP DATABASE |
+| `enable_drop_table` | Allow DROP TABLE |
+
+## Usage with Archery
+
+This chart is commonly used as a dependency for the Archery chart:
+
+```yaml
+# In Archery values.yaml
+goinception:
+  embedded: true
+  image:
+    repository: hanchuanchuan/goinception
+    tag: latest
+  initEnv:
+    - name: BACKUP_HOST
+      value: "archery-mysql"
+    - name: BACKUP_PORT
+      value: "3306"
+    - name: BACKUP_USER
+      value: "root"
+    - name: BACKUP_PASSWORD
+      value: "password"
+```
+
+## Resources
+
+```yaml
+resources:
+  limits:
+    cpu: 500m
+    memory: 512Mi
+  requests:
+    cpu: 100m
+    memory: 128Mi
+```

@@ -1,0 +1,236 @@
+---
+title: Redirect
+description: Simple HTTP redirect configuration using Ingress
+---
+
+Redirect is a simple chart for creating HTTP redirects using Kubernetes Ingress or Gateway API resources.
+
+## Overview
+
+This chart creates Ingress or HTTPRoute resources configured to redirect traffic from source domains to destination URLs without deploying any application containers.
+
+## Installation
+
+```bash
+helm repo add douban https://douban.github.io/charts/
+helm repo update
+helm install my-redirects douban/redirect
+```
+
+## Configuration
+
+### Global Configuration
+
+```yaml
+globalConfigs:
+  # Ingress settings
+  ingressEnabled: true
+  ingressClassName: "nginx"
+  ingressCommonLabels: {}
+  ingressCommonAnnotations:
+    cert-manager.io/cluster-issuer: letsencrypt
+  
+  # Gateway API settings
+  routeEnabled: false
+  routeCommonLabels: {}
+  routeCommonAnnotations: {}
+  routeParentRefs:
+    - name: my-gateway
+      namespace: gateway-system
+```
+
+### Website Redirects
+
+Define redirect rules:
+
+```yaml
+websites:
+  - name: old-domain
+    source: old.example.com
+    destination: new.example.com
+    scheme: https  # http or https
+    statusCode: 301  # 301 or 302
+    path: /
+```
+
+### Redirect with Path Preservation
+
+```yaml
+websites:
+  - name: preserve-path
+    source: old.example.com
+    destination: https://new.example.com
+    include_path: true
+```
+
+With `include_path: true`, requests like `old.example.com/page` redirect to `https://new.example.com/page`.
+
+## Example Values
+
+### Simple Domain Redirect
+
+```yaml
+globalConfigs:
+  ingressEnabled: true
+  ingressClassName: "nginx"
+  ingressCommonAnnotations:
+    cert-manager.io/cluster-issuer: "letsencrypt"
+
+websites:
+  - name: old-to-new
+    source: oldsite.com
+    destination: newsite.com
+    scheme: https
+    statusCode: 301
+    path: /
+```
+
+### Multiple Redirects
+
+```yaml
+globalConfigs:
+  ingressEnabled: true
+  ingressClassName: "nginx"
+  ingressCommonAnnotations:
+    cert-manager.io/cluster-issuer: "letsencrypt-prod"
+
+websites:
+  # Permanent redirect
+  - name: old-domain
+    source: old.example.com
+    destination: new.example.com
+    scheme: https
+    statusCode: 301
+    path: /
+  
+  # Temporary redirect with path
+  - name: temp-redirect
+    source: temp.example.com
+    destination: https://main.example.com
+    include_path: true
+    statusCode: 302
+  
+  # Specific path redirect
+  - name: blog-redirect
+    source: blog.oldsite.com
+    destination: newsite.com/blog
+    scheme: https
+    statusCode: 301
+    path: /
+```
+
+### Using Gateway API (HTTPRoute)
+
+```yaml
+globalConfigs:
+  ingressEnabled: false
+  routeEnabled: true
+  routeCommonLabels:
+    app: redirects
+  routeParentRefs:
+    - name: external-gateway
+      namespace: gateway-system
+
+websites:
+  - name: gateway-redirect
+    source: old.example.com
+    destination: https://new.example.com
+    include_path: true
+```
+
+### WWW to Non-WWW Redirect
+
+```yaml
+globalConfigs:
+  ingressEnabled: true
+  ingressClassName: "nginx"
+  ingressCommonAnnotations:
+    cert-manager.io/cluster-issuer: "letsencrypt"
+
+websites:
+  - name: www-redirect
+    source: www.example.com
+    destination: example.com
+    scheme: https
+    statusCode: 301
+    include_path: true
+```
+
+### Development to Production Redirect
+
+```yaml
+globalConfigs:
+  ingressEnabled: true
+  ingressClassName: "nginx"
+
+websites:
+  - name: dev-to-prod
+    source: dev.myapp.com
+    destination: myapp.com
+    scheme: https
+    statusCode: 302  # Temporary
+    include_path: true
+```
+
+## Key Parameters
+
+| Parameter | Description | Default |
+|-----------|-------------|----------|
+| `globalConfigs.ingressEnabled` | Create Ingress resources | `true` |
+| `globalConfigs.ingressClassName` | Ingress class name | `nginx` |
+| `globalConfigs.routeEnabled` | Create HTTPRoute resources | `false` |
+| `websites[].source` | Source hostname | Required |
+| `websites[].destination` | Destination URL/hostname | Required |
+| `websites[].scheme` | https or http | Required |
+| `websites[].statusCode` | 301 or 302 | Required |
+| `websites[].path` | Path to redirect | `/` |
+| `websites[].include_path` | Preserve original path | `false` |
+
+## Redirect Types
+
+### Permanent Redirect (301)
+
+Use for permanent moves. Search engines will update their index:
+
+```yaml
+statusCode: 301
+```
+
+### Temporary Redirect (302)
+
+Use for temporary moves. Search engines keep the original URL:
+
+```yaml
+statusCode: 302
+```
+
+## NGINX Ingress Annotations
+
+The chart uses these NGINX ingress annotations:
+
+- `nginx.ingress.kubernetes.io/permanent-redirect` - For 301 redirects
+- `nginx.ingress.kubernetes.io/temporal-redirect` - For 302 redirects
+- `nginx.ingress.kubernetes.io/rewrite-target` - For path manipulation
+
+## Use Cases
+
+- Redirect old domains to new domains
+- Redirect www to non-www (or vice versa)
+- Redirect HTTP to HTTPS
+- Redirect development/staging URLs to production
+- Redirect deprecated API endpoints
+- Redirect after domain migration
+
+## Requirements
+
+- Kubernetes 1.16+
+- Helm 3+
+- Ingress controller (NGINX recommended) or Gateway API implementation
+- DNS configured for source domains
+
+## Notes
+
+- No application pods are created - only Ingress/HTTPRoute resources
+- TLS certificates must be managed separately (e.g., via cert-manager)
+- Each website creates a separate Ingress or HTTPRoute resource
+- The source domain must resolve to your cluster's ingress controller

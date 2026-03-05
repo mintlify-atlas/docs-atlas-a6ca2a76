@@ -1,0 +1,335 @@
+---
+title: Codecov
+description: Self-hosted code coverage reporting platform
+---
+
+Codecov is a self-hosted code coverage reporting and analysis platform that integrates with your CI/CD pipeline.
+
+## Overview
+
+Codecov provides a comprehensive solution for tracking code coverage across your projects with support for multiple programming languages, pull request integration, and detailed coverage reports.
+
+**Upstream project**: [https://github.com/codecov/self-hosted](https://github.com/codecov/self-hosted)
+
+<Note>
+Codecov is distributed under the Business Source License (BUSL), not an open source license. This Helm chart is distributed under Apache License 2.0.
+</Note>
+
+## Installation
+
+<Steps>
+  <Step title="Add the Helm repository">
+    ```bash
+    helm repo add douban https://douban.github.io/charts/
+    helm repo update
+    ```
+  </Step>
+
+  <Step title="Create values file">
+    Create a `values.yaml` file with your configuration:
+
+    ```yaml
+    codecov_host: "codecov.example.com"
+    codecov_scheme: https
+
+    codecov_config: |
+      setup:
+        enterprise_license: "YOUR_LICENSE_KEY"
+        http:
+          cookie_secret: "random-string"
+      github:
+        client_id: "your-github-app-id"
+        client_secret: "your-github-secret"
+
+    ingress:
+      enabled: true
+      className: "nginx"
+      hosts:
+        - host: codecov.example.com
+          paths:
+            - path: /
+              pathType: ImplementationSpecific
+    ```
+  </Step>
+
+  <Step title="Install the chart">
+    ```bash
+    helm install codecov douban/codecov -f values.yaml
+    ```
+  </Step>
+</Steps>
+
+## Dependencies
+
+Codecov requires several backing services:
+
+- **PostgreSQL** - Main application database (embedded by default)
+- **Redis** - Caching and task queue (embedded by default)
+- **TimescaleDB** - Time-series data storage (disabled by default)
+- **MinIO/S3** - Object storage for reports (must be external)
+
+## Configuration
+
+### Host and Scheme
+
+```yaml
+codecov_host: "codecov.example.com"
+codecov_scheme: https  # or http
+```
+
+### Enterprise License
+
+Codecov requires an enterprise license:
+
+```yaml
+codecov_config: |
+  setup:
+    enterprise_license: "YOUR_LICENSE_KEY_HERE"
+    http:
+      cookie_secret: "generate-random-string"
+```
+
+### GitHub Integration
+
+```yaml
+codecov_config: |
+  github:
+    client_id: "Iv1.your-app-id"
+    client_secret: "your-client-secret"
+    webhook_secret: "your-webhook-secret"
+    integration:
+      id: 22
+      pem: /config/file.pem
+  setup:
+    admins:
+      - service: github
+        username: "your-username"
+```
+
+### PostgreSQL Configuration
+
+#### Using Embedded PostgreSQL (Default)
+
+```yaml
+postgresql:
+  embedded: true
+  auth:
+    postgresPassword: "testpassword"
+    database: "codecov"
+  primary:
+    persistence:
+      enabled: true
+      size: 50Gi
+```
+
+#### Using External PostgreSQL
+
+```yaml
+postgresql:
+  embedded: false
+  url: "postgres://user:password@postgres-host:5432/codecov"
+  # Or use a secret
+  # urlSecret: "codecov-db-secret"
+  # urlSecretKey: "DATABASE_URL"
+```
+
+### Redis Configuration
+
+#### Using Embedded Redis (Default)
+
+```yaml
+redis:
+  embedded: true
+  auth:
+    password: "REDIS_PASSWORD"
+  master:
+    persistence:
+      enabled: true
+      size: 8Gi
+```
+
+#### Using External Redis
+
+```yaml
+redis:
+  embedded: false
+  url: "redis://password@redis-host:6379/0"
+```
+
+### Object Storage (MinIO/S3)
+
+<Warning>
+Codecov requires an externally accessible object storage service. Embedded MinIO is not supported.
+</Warning>
+
+```yaml
+minio:
+  embedded: false
+  externalHost: "minio.example.com"
+  externalPort: "443"
+
+# In codecov_config:
+codecov_config: |
+  services:
+    minio:
+      host: s3.amazonaws.com
+      bucket: codecov-bucket
+      region: us-east-1
+      access_key_id: YOUR_ACCESS_KEY
+      secret_access_key: YOUR_SECRET_KEY
+```
+
+### TimescaleDB (Optional)
+
+<Note>
+TimescaleDB is disabled by default as the Helm chart has compatibility issues. Use an external TimescaleDB instance if needed.
+</Note>
+
+```yaml
+timescaledb:
+  enabled: false
+  # url: "postgres://user:password@timescale:5432/timescale"
+```
+
+## Components
+
+Codecov consists of multiple services:
+
+### Frontend
+
+```yaml
+frontend:
+  replicaCount: 1
+  image:
+    repository: codecov/self-hosted-frontend
+    tag: ""  # Uses appVersion by default
+  service:
+    type: ClusterIP
+    port: 80
+  containerPort: 8080
+```
+
+### API
+
+```yaml
+api:
+  replicaCount: 1
+  image:
+    repository: codecov/self-hosted-api
+    tag: ""
+  service:
+    type: ClusterIP
+    port: 80
+  containerPort: 8000
+```
+
+### Worker
+
+```yaml
+worker:
+  replicaCount: 1
+  image:
+    repository: codecov/self-hosted-worker
+    tag: ""
+```
+
+### Gateway
+
+```yaml
+gateway:
+  replicaCount: 1
+  image:
+    repository: codecov/self-hosted-gateway
+    tag: ""
+  service:
+    type: ClusterIP
+    port: 80
+```
+
+## Access Configuration
+
+### Ingress
+
+```yaml
+ingress:
+  enabled: true
+  className: "nginx"
+  annotations:
+    cert-manager.io/cluster-issuer: "letsencrypt"
+  hosts:
+    - host: codecov.example.com
+      paths:
+        - path: /
+          pathType: ImplementationSpecific
+  tls:
+    - secretName: codecov-tls
+      hosts:
+        - codecov.example.com
+```
+
+## Example Values
+
+### Minimal Setup with External PostgreSQL
+
+```yaml
+codecov_host: "codecov.example.com"
+codecov_scheme: https
+
+codecov_config: |
+  setup:
+    enterprise_license: "YOUR_LICENSE"
+    http:
+      cookie_secret: "random-secret-string"
+  github:
+    client_id: "your-github-app-id"
+    client_secret: "your-github-secret"
+
+ingress:
+  enabled: true
+  className: "nginx"
+  hosts:
+    - host: codecov.example.com
+      paths:
+        - path: /
+          pathType: ImplementationSpecific
+
+postgresql:
+  embedded: false
+  url: "postgres://codecov:password@external-pg:5432/codecov"
+
+redis:
+  embedded: true
+
+minio:
+  embedded: false
+  externalHost: "s3.amazonaws.com"
+
+timescaledb:
+  enabled: false
+```
+
+## Key Parameters
+
+| Parameter | Description | Default |
+|-----------|-------------|----------|
+| `codecov_host` | Hostname for Codecov | `codecov.example.com` |
+| `codecov_scheme` | URL scheme (http/https) | `https` |
+| `postgresql.embedded` | Use embedded PostgreSQL | `true` |
+| `redis.embedded` | Use embedded Redis | `true` |
+| `minio.embedded` | Use embedded MinIO | `false` |
+| `timescaledb.enabled` | Enable TimescaleDB | `false` |
+| `frontend.replicaCount` | Frontend replicas | `1` |
+| `api.replicaCount` | API replicas | `1` |
+| `worker.replicaCount` | Worker replicas | `1` |
+
+## Known Issues
+
+- **External MinIO Required**: The embedded MinIO option is not functional. Codecov requires an externally accessible S3-compatible service.
+- **TimescaleDB**: The TimescaleDB Helm chart integration is not working. Use an external TimescaleDB instance if time-series features are needed.
+
+## Requirements
+
+- Kubernetes 1.16+
+- Helm 3+
+- External object storage (S3/MinIO)
+- Codecov Enterprise license

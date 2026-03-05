@@ -1,0 +1,771 @@
+---
+title: "Advanced Customization"
+description: "Deep customization of Helm charts with volumes, resources, and scheduling"
+---
+
+## Overview
+
+Beyond basic configuration, charts support advanced customization for production workloads including resource management, storage, security, and scheduling.
+
+## Custom Volumes and Mounts
+
+### Basic Volume Configuration
+
+Charts support arbitrary volumes and volumeMounts through values:
+
+```yaml
+volumes:
+  - name: config
+    configMap:
+      name: app-config
+  - name: secrets
+    secret:
+      secretName: app-secrets
+
+volumeMounts:
+  - name: config
+    mountPath: /etc/config
+    readOnly: true
+  - name: secrets
+    mountPath: /etc/secrets
+    readOnly: true
+```
+
+### Common Volume Types
+
+<Tabs>
+  <Tab title="ConfigMap">
+    ```yaml
+    volumes:
+      - name: app-config
+        configMap:
+          name: my-config
+          items:
+            - key: config.json
+              path: app-config.json
+    
+    volumeMounts:
+      - name: app-config
+        mountPath: /etc/app
+        readOnly: true
+    ```
+    
+    **Use for:** Configuration files, non-sensitive data
+  </Tab>
+  
+  <Tab title="Secret">
+    ```yaml
+    volumes:
+      - name: tls-certs
+        secret:
+          secretName: tls-secret
+          defaultMode: 0400
+    
+    volumeMounts:
+      - name: tls-certs
+        mountPath: /etc/tls
+        readOnly: true
+    ```
+    
+    **Use for:** Sensitive data, credentials, certificates
+  </Tab>
+  
+  <Tab title="EmptyDir">
+    ```yaml
+    volumes:
+      - name: cache
+        emptyDir:
+          sizeLimit: 1Gi
+      - name: memory-cache
+        emptyDir:
+          medium: Memory
+          sizeLimit: 512Mi
+    
+    volumeMounts:
+      - name: cache
+        mountPath: /var/cache
+      - name: memory-cache
+        mountPath: /tmp/memory
+    ```
+    
+    **Use for:** Temporary storage, cache, shared memory
+  </Tab>
+  
+  <Tab title="PersistentVolumeClaim">
+    ```yaml
+    volumes:
+      - name: data
+        persistentVolumeClaim:
+          claimName: app-data-pvc
+    
+    volumeMounts:
+      - name: data
+        mountPath: /var/lib/app
+    ```
+    
+    **Use for:** Persistent data that survives pod restarts
+  </Tab>
+  
+  <Tab title="HostPath">
+    ```yaml
+    volumes:
+      - name: docker-sock
+        hostPath:
+          path: /var/run/docker.sock
+          type: Socket
+      - name: logs
+        hostPath:
+          path: /var/log/app
+          type: DirectoryOrCreate
+    
+    volumeMounts:
+      - name: docker-sock
+        mountPath: /var/run/docker.sock
+      - name: logs
+        mountPath: /logs
+    ```
+    
+    **Use for:** Node-specific access (use sparingly)
+  </Tab>
+</Tabs>
+
+### Real-World Examples
+
+<CodeGroup>
+```yaml Nginx Custom Config
+# Custom nginx.conf via ConfigMap
+volumes:
+  - name: nginx-config
+    configMap:
+      name: nginx-custom-config
+  - name: cache
+    emptyDir:
+      sizeLimit: 5Gi
+
+volumeMounts:
+  - name: nginx-config
+    mountPath: /etc/nginx/nginx.conf
+    subPath: nginx.conf
+    readOnly: true
+  - name: cache
+    mountPath: /var/cache/nginx
+```
+
+```yaml Application with TLS
+# Application with TLS certificates and data
+volumes:
+  - name: tls-certs
+    secret:
+      secretName: app-tls
+  - name: data
+    persistentVolumeClaim:
+      claimName: app-data
+
+volumeMounts:
+  - name: tls-certs
+    mountPath: /etc/tls
+    readOnly: true
+  - name: data
+    mountPath: /var/lib/app
+```
+
+```yaml Multi-Component App (Dify)
+# Shared volumes for API and worker components
+volumes:
+  - name: shared-storage
+    persistentVolumeClaim:
+      claimName: dify-shared-pvc
+  - name: app-config
+    configMap:
+      name: dify-config
+
+volumeMounts:
+  - name: shared-storage
+    mountPath: /app/storage
+  - name: app-config
+    mountPath: /app/config
+    readOnly: true
+```
+</CodeGroup>
+
+## Resource Management
+
+### Resource Requests and Limits
+
+<Tabs>
+  <Tab title="Development">
+    ```yaml
+    resources:
+      limits:
+        cpu: 100m
+        memory: 128Mi
+      requests:
+        cpu: 50m
+        memory: 64Mi
+    ```
+    
+    **Characteristics:**
+    - Minimal resource usage
+    - Lower requests for bin packing
+    - Suitable for dev/test environments
+  </Tab>
+  
+  <Tab title="Production">
+    ```yaml
+    resources:
+      limits:
+        cpu: 1000m
+        memory: 2Gi
+      requests:
+        cpu: 500m
+        memory: 1Gi
+    ```
+    
+    **Characteristics:**
+    - Higher requests for guaranteed resources
+    - Limits prevent resource exhaustion
+    - Room for burst capacity
+  </Tab>
+  
+  <Tab title="Memory-Intensive">
+    ```yaml
+    resources:
+      limits:
+        cpu: 2000m
+        memory: 8Gi
+      requests:
+        cpu: 1000m
+        memory: 4Gi
+    ```
+    
+    **Use for:** Databases, caches, data processing
+  </Tab>
+  
+  <Tab title="CPU-Intensive">
+    ```yaml
+    resources:
+      limits:
+        cpu: 4000m
+        memory: 2Gi
+      requests:
+        cpu: 2000m
+        memory: 1Gi
+    ```
+    
+    **Use for:** API servers, computational workloads
+  </Tab>
+</Tabs>
+
+### Best Practices
+
+<AccordionGroup>
+  <Accordion title="Always Set Requests">
+    **Why:** Kubernetes needs requests for scheduling decisions.
+    
+    ```yaml
+    # Bad - no requests
+    resources:
+      limits:
+        memory: 1Gi
+    
+    # Good - requests guide scheduling
+    resources:
+      limits:
+        memory: 1Gi
+      requests:
+        memory: 512Mi
+    ```
+  </Accordion>
+  
+  <Accordion title="Requests ≤ Limits">
+    **Why:** Requests are guaranteed, limits are maximum.
+    
+    ```yaml
+    # Bad - requests > limits
+    resources:
+      limits:
+        cpu: 500m
+      requests:
+        cpu: 1000m  # Invalid!
+    
+    # Good
+    resources:
+      limits:
+        cpu: 1000m
+      requests:
+        cpu: 500m
+    ```
+  </Accordion>
+  
+  <Accordion title="Monitor and Adjust">
+    Start conservative and adjust based on metrics:
+    
+    ```bash
+    # Check actual usage
+    kubectl top pod -l app=my-app
+    
+    # View resource metrics over time (with Prometheus)
+    # Then adjust values.yaml
+    ```
+  </Accordion>
+  
+  <Accordion title="Different Resources per Component">
+    For multi-component charts like Dify:
+    
+    ```yaml
+    frontend:
+      resources:
+        requests:
+          cpu: 100m
+          memory: 128Mi
+    
+    api:
+      resources:
+        requests:
+          cpu: 500m
+          memory: 1Gi
+    
+    worker:
+      resources:
+        requests:
+          cpu: 1000m
+          memory: 2Gi
+    ```
+  </Accordion>
+</AccordionGroup>
+
+## Pod Security Context
+
+### Pod-Level Security
+
+```yaml
+podSecurityContext:
+  runAsNonRoot: true
+  runAsUser: 1000
+  runAsGroup: 3000
+  fsGroup: 2000
+  fsGroupChangePolicy: "OnRootMismatch"
+  seccompProfile:
+    type: RuntimeDefault
+```
+
+**Key Settings:**
+- `runAsNonRoot`: Prevents running as root
+- `runAsUser`: Specific UID for the process
+- `fsGroup`: GID for volume ownership
+- `seccompProfile`: Security compute mode profile
+
+### Container-Level Security
+
+```yaml
+securityContext:
+  allowPrivilegeEscalation: false
+  readOnlyRootFilesystem: true
+  runAsNonRoot: true
+  runAsUser: 1000
+  capabilities:
+    drop:
+      - ALL
+    add:
+      - NET_BIND_SERVICE
+```
+
+**Key Settings:**
+- `allowPrivilegeEscalation`: Prevents gaining additional privileges
+- `readOnlyRootFilesystem`: Immutable root filesystem
+- `capabilities`: Fine-grained permissions
+
+### Security Profiles
+
+<Tabs>
+  <Tab title="Baseline">
+    ```yaml
+    podSecurityContext:
+      runAsNonRoot: true
+      seccompProfile:
+        type: RuntimeDefault
+    
+    securityContext:
+      allowPrivilegeEscalation: false
+      capabilities:
+        drop:
+          - ALL
+    ```
+    
+    **Use for:** Standard applications
+  </Tab>
+  
+  <Tab title="Restricted">
+    ```yaml
+    podSecurityContext:
+      runAsNonRoot: true
+      runAsUser: 1000
+      fsGroup: 2000
+      seccompProfile:
+        type: RuntimeDefault
+    
+    securityContext:
+      allowPrivilegeEscalation: false
+      readOnlyRootFilesystem: true
+      runAsNonRoot: true
+      runAsUser: 1000
+      capabilities:
+        drop:
+          - ALL
+    ```
+    
+    **Use for:** Highly secure environments
+  </Tab>
+  
+  <Tab title="Privileged">
+    ```yaml
+    podSecurityContext: {}
+    
+    securityContext:
+      privileged: true
+    ```
+    
+    **Use for:** System-level tools (avoid if possible)
+  </Tab>
+</Tabs>
+
+## Node Scheduling
+
+### Node Selector
+
+Schedule pods on specific nodes by label:
+
+```yaml
+nodeSelector:
+  kubernetes.io/hostname: node-1
+  node-type: compute-optimized
+  environment: production
+```
+
+**Common Labels:**
+- `kubernetes.io/hostname`: Specific node
+- `kubernetes.io/os`: Operating system
+- `node.kubernetes.io/instance-type`: Cloud instance type
+- Custom labels you've added to nodes
+
+### Tolerations
+
+Allow pods to schedule on tainted nodes:
+
+<CodeGroup>
+```yaml Basic Toleration
+tolerations:
+  - key: "dedicated"
+    operator: "Equal"
+    value: "database"
+    effect: "NoSchedule"
+```
+
+```yaml Multiple Tolerations
+tolerations:
+  - key: "dedicated"
+    operator: "Equal"
+    value: "app"
+    effect: "NoSchedule"
+  - key: "gpu"
+    operator: "Exists"
+    effect: "NoExecute"
+  - key: "node.kubernetes.io/not-ready"
+    operator: "Exists"
+    effect: "NoExecute"
+    tolerationSeconds: 300
+```
+
+```yaml Tolerate All
+tolerations:
+  - operator: "Exists"
+```
+</CodeGroup>
+
+**Common Taints:**
+- `dedicated=<value>:NoSchedule`: Dedicated nodes
+- `gpu=true:NoSchedule`: GPU nodes
+- `node.kubernetes.io/not-ready`: Unready nodes
+
+### Affinity Rules
+
+<Tabs>
+  <Tab title="Node Affinity">
+    ```yaml
+    affinity:
+      nodeAffinity:
+        requiredDuringSchedulingIgnoredDuringExecution:
+          nodeSelectorTerms:
+            - matchExpressions:
+                - key: node-type
+                  operator: In
+                  values:
+                    - compute-optimized
+                    - memory-optimized
+        preferredDuringSchedulingIgnoredDuringExecution:
+          - weight: 100
+            preference:
+              matchExpressions:
+                - key: zone
+                  operator: In
+                  values:
+                    - us-east-1a
+    ```
+    
+    **Use for:** Placing pods on specific node types
+  </Tab>
+  
+  <Tab title="Pod Affinity">
+    ```yaml
+    affinity:
+      podAffinity:
+        requiredDuringSchedulingIgnoredDuringExecution:
+          - labelSelector:
+              matchExpressions:
+                - key: app
+                  operator: In
+                  values:
+                    - cache
+            topologyKey: kubernetes.io/hostname
+    ```
+    
+    **Use for:** Co-locating related pods (app + cache)
+  </Tab>
+  
+  <Tab title="Pod Anti-Affinity">
+    ```yaml
+    affinity:
+      podAntiAffinity:
+        requiredDuringSchedulingIgnoredDuringExecution:
+          - labelSelector:
+              matchExpressions:
+                - key: app
+                  operator: In
+                  values:
+                    - my-app
+            topologyKey: kubernetes.io/hostname
+    ```
+    
+    **Use for:** Spreading replicas across nodes for HA
+  </Tab>
+  
+  <Tab title="Combined">
+    ```yaml
+    affinity:
+      nodeAffinity:
+        requiredDuringSchedulingIgnoredDuringExecution:
+          nodeSelectorTerms:
+            - matchExpressions:
+                - key: node-type
+                  operator: In
+                  values:
+                    - compute
+      podAntiAffinity:
+        preferredDuringSchedulingIgnoredDuringExecution:
+          - weight: 100
+            podAffinityTerm:
+              labelSelector:
+                matchExpressions:
+                  - key: app
+                    operator: In
+                    values:
+                      - my-app
+              topologyKey: kubernetes.io/hostname
+    ```
+    
+    **Use for:** Complex scheduling requirements
+  </Tab>
+</Tabs>
+
+### High Availability Pattern
+
+```yaml
+# Ensure replicas spread across nodes and zones
+replicaCount: 3
+
+affinity:
+  podAntiAffinity:
+    requiredDuringSchedulingIgnoredDuringExecution:
+      - labelSelector:
+          matchExpressions:
+            - key: app.kubernetes.io/name
+              operator: In
+              values:
+                - my-app
+        topologyKey: kubernetes.io/hostname
+    preferredDuringSchedulingIgnoredDuringExecution:
+      - weight: 100
+        podAffinityTerm:
+          labelSelector:
+            matchExpressions:
+              - key: app.kubernetes.io/name
+                operator: In
+                values:
+                  - my-app
+          topologyKey: topology.kubernetes.io/zone
+```
+
+## Pod Annotations and Labels
+
+### Pod Annotations
+
+```yaml
+podAnnotations:
+  prometheus.io/scrape: "true"
+  prometheus.io/port: "8080"
+  prometheus.io/path: "/metrics"
+  linkerd.io/inject: "enabled"
+  vault.hashicorp.com/agent-inject: "true"
+  vault.hashicorp.com/role: "myapp"
+```
+
+**Common Uses:**
+- Service mesh configuration (Linkerd, Istio)
+- Monitoring (Prometheus)
+- Secret injection (Vault)
+- Custom automation
+
+### Pod Labels
+
+Some charts support additional pod labels:
+
+```yaml
+podLabels:
+  environment: production
+  team: platform
+  cost-center: engineering
+  app.kubernetes.io/component: backend
+```
+
+## Complete Production Example
+
+```yaml production-values.yaml
+# Production-ready configuration with all customizations
+replicaCount: 3
+
+image:
+  repository: myapp/api
+  tag: "v1.2.3"
+  pullPolicy: IfNotPresent
+
+imagePullSecrets:
+  - name: registry-credentials
+
+podAnnotations:
+  prometheus.io/scrape: "true"
+  prometheus.io/port: "8080"
+
+podLabels:
+  environment: production
+  team: platform
+
+podSecurityContext:
+  runAsNonRoot: true
+  runAsUser: 1000
+  fsGroup: 2000
+  seccompProfile:
+    type: RuntimeDefault
+
+securityContext:
+  allowPrivilegeEscalation: false
+  readOnlyRootFilesystem: true
+  runAsNonRoot: true
+  capabilities:
+    drop:
+      - ALL
+
+resources:
+  limits:
+    cpu: 1000m
+    memory: 2Gi
+  requests:
+    cpu: 500m
+    memory: 1Gi
+
+volumes:
+  - name: tmp
+    emptyDir: {}
+  - name: cache
+    emptyDir:
+      sizeLimit: 5Gi
+  - name: config
+    configMap:
+      name: app-config
+  - name: tls
+    secret:
+      secretName: app-tls
+
+volumeMounts:
+  - name: tmp
+    mountPath: /tmp
+  - name: cache
+    mountPath: /var/cache
+  - name: config
+    mountPath: /etc/config
+    readOnly: true
+  - name: tls
+    mountPath: /etc/tls
+    readOnly: true
+
+env:
+  - name: LOG_LEVEL
+    value: "info"
+  - name: DATABASE_URL
+    valueFrom:
+      secretKeyRef:
+        name: db-credentials
+        key: url
+
+nodeSelector:
+  node-type: compute-optimized
+
+tolerations:
+  - key: "dedicated"
+    operator: "Equal"
+    value: "app"
+    effect: "NoSchedule"
+
+affinity:
+  podAntiAffinity:
+    requiredDuringSchedulingIgnoredDuringExecution:
+      - labelSelector:
+          matchExpressions:
+            - key: app.kubernetes.io/name
+              operator: In
+              values:
+                - my-app
+        topologyKey: kubernetes.io/hostname
+    preferredDuringSchedulingIgnoredDuringExecution:
+      - weight: 100
+        podAffinityTerm:
+          labelSelector:
+            matchExpressions:
+              - key: app.kubernetes.io/name
+                operator: In
+                values:
+                  - my-app
+          topologyKey: topology.kubernetes.io/zone
+
+autoscaling:
+  enabled: true
+  minReplicas: 3
+  maxReplicas: 10
+  targetCPUUtilizationPercentage: 70
+```
+
+## Next Steps
+
+<CardGroup cols={2}>
+  <Card title="Values Configuration" icon="file-lines" href="/configuration/values">
+    Learn about values.yaml basics
+  </Card>
+  <Card title="Ingress Setup" icon="network-wired" href="/configuration/ingress">
+    Configure external access
+  </Card>
+  <Card title="Monitoring" icon="chart-line" href="/configuration/monitoring">
+    Set up Prometheus monitoring
+  </Card>
+  <Card title="Chart Reference" icon="star" href="/reference/overview">
+    Production deployment patterns
+  </Card>
+</CardGroup>

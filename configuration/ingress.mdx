@@ -1,0 +1,785 @@
+---
+title: "Ingress Configuration"
+description: "Configure Ingress and HTTPRoute for external access to your applications"
+---
+
+## Overview
+
+Charts support two approaches for external traffic routing:
+- **Traditional Ingress**: Mature, widely supported
+- **HTTPRoute (Gateway API)**: Modern, more expressive
+
+Both can be configured through `values.yaml` and are mutually compatible.
+
+## Traditional Ingress
+
+### Basic Configuration
+
+```yaml
+ingress:
+  enabled: true
+  className: nginx  # or traefik, alb, etc.
+  hosts:
+    - host: myapp.example.com
+      paths:
+        - path: /
+          pathType: Prefix
+```
+
+### Complete Example
+
+<CodeGroup>
+```yaml Single Host
+ingress:
+  enabled: true
+  className: nginx
+  annotations:
+    cert-manager.io/cluster-issuer: letsencrypt-prod
+  hosts:
+    - host: myapp.example.com
+      paths:
+        - path: /
+          pathType: Prefix
+  tls:
+    - secretName: myapp-tls
+      hosts:
+        - myapp.example.com
+```
+
+```yaml Multiple Hosts
+ingress:
+  enabled: true
+  className: nginx
+  hosts:
+    - host: app.example.com
+      paths:
+        - path: /
+          pathType: Prefix
+    - host: api.example.com
+      paths:
+        - path: /v1
+          pathType: Prefix
+        - path: /v2
+          pathType: Prefix
+  tls:
+    - secretName: app-tls
+      hosts:
+        - app.example.com
+    - secretName: api-tls
+      hosts:
+        - api.example.com
+```
+
+```yaml Path-Based Routing
+ingress:
+  enabled: true
+  className: nginx
+  hosts:
+    - host: example.com
+      paths:
+        - path: /api
+          pathType: Prefix
+        - path: /admin
+          pathType: Exact
+  annotations:
+    nginx.ingress.kubernetes.io/rewrite-target: /
+```
+</CodeGroup>
+
+### Ingress Class
+
+<Tabs>
+  <Tab title="Nginx">
+    ```yaml
+    ingress:
+      enabled: true
+      className: nginx
+      annotations:
+        nginx.ingress.kubernetes.io/ssl-redirect: "true"
+        nginx.ingress.kubernetes.io/force-ssl-redirect: "true"
+    ```
+    
+    **Common annotations:**
+    - `rewrite-target`: URL rewriting
+    - `ssl-redirect`: Force HTTPS
+    - `rate-limit`: Request rate limiting
+    - `whitelist-source-range`: IP whitelisting
+  </Tab>
+  
+  <Tab title="Traefik">
+    ```yaml
+    ingress:
+      enabled: true
+      className: traefik
+      annotations:
+        traefik.ingress.kubernetes.io/router.middlewares: default-redirect-https@kubernetescrd
+    ```
+    
+    **Common annotations:**
+    - `router.middlewares`: Middleware chain
+    - `router.tls`: TLS configuration
+    - `router.entrypoints`: Entry points
+  </Tab>
+  
+  <Tab title="AWS ALB">
+    ```yaml
+    ingress:
+      enabled: true
+      className: alb
+      annotations:
+        alb.ingress.kubernetes.io/scheme: internet-facing
+        alb.ingress.kubernetes.io/target-type: ip
+        alb.ingress.kubernetes.io/certificate-arn: arn:aws:acm:...
+    ```
+    
+    **Common annotations:**
+    - `scheme`: internet-facing or internal
+    - `certificate-arn`: ACM certificate
+    - `ssl-policy`: SSL policy
+    - `target-type`: ip or instance
+  </Tab>
+  
+  <Tab title="GKE">
+    ```yaml
+    ingress:
+      enabled: true
+      className: gce
+      annotations:
+        kubernetes.io/ingress.global-static-ip-name: web-static-ip
+        networking.gke.io/managed-certificates: managed-cert
+    ```
+    
+    **Common annotations:**
+    - `global-static-ip-name`: Reserved IP
+    - `managed-certificates`: Google-managed certs
+    - `ssl-policy`: SSL policy
+  </Tab>
+</Tabs>
+
+### TLS Configuration
+
+<Tabs>
+  <Tab title="Manual Secret">
+    ```yaml
+    ingress:
+      enabled: true
+      className: nginx
+      hosts:
+        - host: myapp.example.com
+          paths:
+            - path: /
+              pathType: Prefix
+      tls:
+        - secretName: myapp-tls-manual
+          hosts:
+            - myapp.example.com
+    ```
+    
+    Create the secret manually:
+    ```bash
+    kubectl create secret tls myapp-tls-manual \
+      --cert=path/to/cert.pem \
+      --key=path/to/key.pem
+    ```
+  </Tab>
+  
+  <Tab title="cert-manager">
+    ```yaml
+    ingress:
+      enabled: true
+      className: nginx
+      annotations:
+        cert-manager.io/cluster-issuer: letsencrypt-prod
+        # or cert-manager.io/issuer: letsencrypt-prod
+      hosts:
+        - host: myapp.example.com
+          paths:
+            - path: /
+              pathType: Prefix
+      tls:
+        - secretName: myapp-tls-auto
+          hosts:
+            - myapp.example.com
+    ```
+    
+    cert-manager automatically provisions and renews certificates.
+  </Tab>
+  
+  <Tab title="Cloud Provider">
+    ```yaml
+    # AWS ALB with ACM
+    ingress:
+      enabled: true
+      className: alb
+      annotations:
+        alb.ingress.kubernetes.io/certificate-arn: arn:aws:acm:us-east-1:123456789012:certificate/abc123
+      hosts:
+        - host: myapp.example.com
+          paths:
+            - path: /
+              pathType: Prefix
+      # No tls section needed - handled by ALB
+    ```
+    
+    Cloud load balancers handle TLS termination.
+  </Tab>
+  
+  <Tab title="Wildcard">
+    ```yaml
+    ingress:
+      enabled: true
+      className: nginx
+      annotations:
+        cert-manager.io/cluster-issuer: letsencrypt-prod
+      hosts:
+        - host: app1.example.com
+          paths:
+            - path: /
+              pathType: Prefix
+        - host: app2.example.com
+          paths:
+            - path: /
+              pathType: Prefix
+      tls:
+        - secretName: wildcard-tls
+          hosts:
+            - "*.example.com"
+    ```
+    
+    One certificate for multiple subdomains.
+  </Tab>
+</Tabs>
+
+### Common Annotations
+
+<AccordionGroup>
+  <Accordion title="HTTPS Redirect">
+    ```yaml
+    ingress:
+      annotations:
+        # Nginx
+        nginx.ingress.kubernetes.io/ssl-redirect: "true"
+        nginx.ingress.kubernetes.io/force-ssl-redirect: "true"
+        
+        # Traefik
+        traefik.ingress.kubernetes.io/redirect-entry-point: https
+        traefik.ingress.kubernetes.io/redirect-permanent: "true"
+    ```
+  </Accordion>
+  
+  <Accordion title="CORS">
+    ```yaml
+    ingress:
+      annotations:
+        nginx.ingress.kubernetes.io/enable-cors: "true"
+        nginx.ingress.kubernetes.io/cors-allow-methods: "GET, POST, PUT, DELETE, OPTIONS"
+        nginx.ingress.kubernetes.io/cors-allow-origin: "https://example.com"
+        nginx.ingress.kubernetes.io/cors-allow-credentials: "true"
+    ```
+  </Accordion>
+  
+  <Accordion title="Rate Limiting">
+    ```yaml
+    ingress:
+      annotations:
+        nginx.ingress.kubernetes.io/limit-rps: "10"
+        nginx.ingress.kubernetes.io/limit-connections: "5"
+    ```
+  </Accordion>
+  
+  <Accordion title="Rewrite Rules">
+    ```yaml
+    ingress:
+      annotations:
+        nginx.ingress.kubernetes.io/rewrite-target: /$2
+      hosts:
+        - host: example.com
+          paths:
+            - path: /api(/|$)(.*)
+              pathType: Prefix
+    ```
+  </Accordion>
+  
+  <Accordion title="Authentication">
+    ```yaml
+    ingress:
+      annotations:
+        nginx.ingress.kubernetes.io/auth-type: basic
+        nginx.ingress.kubernetes.io/auth-secret: basic-auth
+        nginx.ingress.kubernetes.io/auth-realm: "Authentication Required"
+    ```
+  </Accordion>
+</AccordionGroup>
+
+## HTTPRoute (Gateway API)
+
+### Basic Configuration
+
+```yaml
+httpRoute:
+  enabled: true
+  gatewayRef:
+    name: envoy-gateway-bundle
+    namespace: envoy-gateway-system
+  reuseIngressConfiguration: true  # Reuse ingress.hosts
+```
+
+### Reusing Ingress Configuration
+
+When `reuseIngressConfiguration: true`, HTTPRoute reads from `ingress.hosts`:
+
+```yaml
+ingress:
+  hosts:
+    - host: myapp.example.com
+      paths:
+        - path: /
+          pathType: Prefix
+
+httpRoute:
+  enabled: true
+  gatewayRef:
+    name: envoy-gateway-bundle
+    namespace: envoy-gateway-system
+  reuseIngressConfiguration: true
+  # Automatically uses myapp.example.com
+```
+
+### Standalone HTTPRoute
+
+```yaml
+httpRoute:
+  enabled: true
+  gatewayRef:
+    name: my-gateway
+    namespace: gateway-system
+  reuseIngressConfiguration: false
+  hostnames:
+    - myapp.example.com
+    - api.example.com
+```
+
+### Advanced Routing
+
+<CodeGroup>
+```yaml Header-Based Routing
+httpRoute:
+  enabled: true
+  gatewayRef:
+    name: envoy-gateway-bundle
+    namespace: envoy-gateway-system
+  reuseIngressConfiguration: false
+  hostnames:
+    - api.example.com
+  extraPaths:
+    - matches:
+        - path:
+            type: PathPrefix
+            value: /v2
+          headers:
+            - name: X-API-Version
+              value: "v2"
+      backendRefs:
+        - name: api-v2
+          port: 8080
+```
+
+```yaml Traffic Splitting
+httpRoute:
+  enabled: true
+  gatewayRef:
+    name: envoy-gateway-bundle
+    namespace: envoy-gateway-system
+  reuseIngressConfiguration: false
+  hostnames:
+    - myapp.example.com
+  extraPaths:
+    - matches:
+        - path:
+            type: PathPrefix
+            value: /
+      backendRefs:
+        - name: myapp-v1
+          port: 80
+          weight: 90
+        - name: myapp-v2
+          port: 80
+          weight: 10
+```
+
+```yaml Multi-Service Routing
+httpRoute:
+  enabled: true
+  gatewayRef:
+    name: envoy-gateway-bundle
+    namespace: envoy-gateway-system
+  reuseIngressConfiguration: false
+  hostnames:
+    - example.com
+  extraPaths:
+    - matches:
+        - path:
+            type: PathPrefix
+            value: /api
+      backendRefs:
+        - name: backend-api
+          port: 8080
+    - matches:
+        - path:
+            type: PathPrefix
+            value: /static
+      backendRefs:
+        - name: static-server
+          port: 8081
+```
+</CodeGroup>
+
+### Gateway API Features
+
+<Tabs>
+  <Tab title="Path Matching">
+    ```yaml
+    extraPaths:
+      # Exact match
+      - matches:
+          - path:
+              type: Exact
+              value: /api/v1/users
+        backendRefs:
+          - name: users-api
+            port: 8080
+      
+      # Prefix match
+      - matches:
+          - path:
+              type: PathPrefix
+              value: /api
+        backendRefs:
+          - name: api-gateway
+            port: 8080
+      
+      # Regular expression (if supported by gateway)
+      - matches:
+          - path:
+              type: RegularExpression
+              value: "/api/v[0-9]+/.*"
+        backendRefs:
+          - name: api-versioned
+            port: 8080
+    ```
+  </Tab>
+  
+  <Tab title="Header Matching">
+    ```yaml
+    extraPaths:
+      - matches:
+          - headers:
+              - type: Exact
+                name: X-API-Key
+                value: "secret-key"
+              - type: RegularExpression
+                name: User-Agent
+                value: ".*Mobile.*"
+        backendRefs:
+          - name: mobile-api
+            port: 8080
+    ```
+  </Tab>
+  
+  <Tab title="Method Matching">
+    ```yaml
+    extraPaths:
+      # POST requests to specific endpoint
+      - matches:
+          - method: POST
+            path:
+              type: Exact
+              value: /api/webhook
+        backendRefs:
+          - name: webhook-handler
+            port: 8080
+      
+      # GET requests
+      - matches:
+          - method: GET
+            path:
+              type: PathPrefix
+              value: /api
+        backendRefs:
+          - name: read-api
+            port: 8080
+    ```
+  </Tab>
+  
+  <Tab title="Query Params">
+    ```yaml
+    extraPaths:
+      - matches:
+          - queryParams:
+              - type: Exact
+                name: version
+                value: "2"
+            path:
+              type: PathPrefix
+              value: /api
+        backendRefs:
+          - name: api-v2
+            port: 8080
+    ```
+  </Tab>
+</Tabs>
+
+### Rate Limiting with Gateway API
+
+Example from the Dify chart:
+
+```yaml
+httpRoute:
+  enabled: true
+  gatewayRef:
+    name: envoy-gateway-bundle
+    namespace: envoy-gateway-system
+  hostnames:
+    - api.example.com
+  globalRateLimit:
+    enabled: true
+    rules:
+      - clientSelectors:
+          - path:
+              type: PathPrefix
+              value: /v1/
+          - headers:
+              - name: Authorization
+                type: Distinct
+        limit:
+          requests: 120
+          unit: Minute
+```
+
+## Real-World Examples
+
+### Example 1: Production Web App (Nginx)
+
+```yaml nginx-production.yaml
+ingress:
+  enabled: true
+  className: nginx
+  annotations:
+    cert-manager.io/cluster-issuer: letsencrypt-prod
+    nginx.ingress.kubernetes.io/ssl-redirect: "true"
+    nginx.ingress.kubernetes.io/force-ssl-redirect: "true"
+    nginx.ingress.kubernetes.io/enable-cors: "true"
+    nginx.ingress.kubernetes.io/cors-allow-origin: "https://example.com"
+    nginx.ingress.kubernetes.io/limit-rps: "100"
+  hosts:
+    - host: www.example.com
+      paths:
+        - path: /
+          pathType: Prefix
+    - host: example.com
+      paths:
+        - path: /
+          pathType: Prefix
+  tls:
+    - secretName: example-com-tls
+      hosts:
+        - www.example.com
+        - example.com
+```
+
+### Example 2: Multi-Component App (Dify)
+
+```yaml dify-values.yaml
+global:
+  host: dify.example.com
+  enableTLS: true
+
+ingress:
+  enabled: true
+  className: nginx
+  annotations:
+    cert-manager.io/cluster-issuer: letsencrypt-prod
+    nginx.ingress.kubernetes.io/proxy-body-size: 100m
+  tlsSecretName: dify-tls
+
+# Automatically creates routes to:
+# - Frontend (/)  
+# - API (/api)
+# - Console (/console)
+```
+
+### Example 3: Gateway API with Envoy
+
+```yaml envoy-gateway.yaml
+ingress:
+  enabled: false  # Using HTTPRoute instead
+
+httpRoute:
+  enabled: true
+  gatewayRef:
+    name: envoy-gateway
+    namespace: envoy-gateway-system
+  reuseIngressConfiguration: false
+  hostnames:
+    - api.example.com
+  extraPaths:
+    # Public API - rate limited
+    - matches:
+        - path:
+            type: PathPrefix
+            value: /v1/public
+      backendRefs:
+        - name: public-api
+          port: 8080
+    
+    # Authenticated API - requires header
+    - matches:
+        - path:
+            type: PathPrefix
+            value: /v1/private
+          headers:
+            - name: Authorization
+              type: RegularExpression
+              value: "Bearer .*"
+      backendRefs:
+        - name: private-api
+          port: 8080
+    
+    # Canary deployment - 90/10 split
+    - matches:
+        - path:
+            type: PathPrefix
+            value: /
+      backendRefs:
+        - name: app-stable
+          port: 80
+          weight: 90
+        - name: app-canary
+          port: 80
+          weight: 10
+```
+
+## Choosing Between Ingress and HTTPRoute
+
+<Tabs>
+  <Tab title="Use Ingress When">
+    - You need maximum compatibility
+    - Using existing ingress controllers
+    - Simple host/path routing is sufficient
+    - Team is familiar with Ingress
+    - Production stability is critical
+    
+    **Pros:**
+    - Mature and stable
+    - Wide ecosystem support
+    - Extensive documentation
+    - Battle-tested in production
+  </Tab>
+  
+  <Tab title="Use HTTPRoute When">
+    - You need advanced routing (headers, methods, etc.)
+    - Traffic splitting/canary deployments
+    - Using Gateway API compatible controllers
+    - Future-proofing infrastructure
+    - Multi-protocol routing needs
+    
+    **Pros:**
+    - More expressive routing
+    - Better traffic management
+    - Future Kubernetes standard
+    - Enhanced observability
+  </Tab>
+  
+  <Tab title="Use Both When">
+    - Gradual migration from Ingress to Gateway API
+    - Different environments need different approaches
+    - Testing Gateway API in non-production
+    
+    Both can coexist:
+    ```yaml
+    ingress:
+      enabled: true
+      className: nginx
+      hosts:
+        - host: app.example.com
+          paths:
+            - path: /
+              pathType: Prefix
+    
+    httpRoute:
+      enabled: true
+      reuseIngressConfiguration: true
+      gatewayRef:
+        name: envoy-gateway
+        namespace: envoy-gateway-system
+    ```
+  </Tab>
+</Tabs>
+
+## Troubleshooting
+
+### Ingress Not Working
+
+```bash
+# Check ingress resource
+kubectl get ingress
+kubectl describe ingress <ingress-name>
+
+# Check ingress controller pods
+kubectl get pods -n ingress-nginx
+kubectl logs -n ingress-nginx <controller-pod>
+
+# Check service endpoints
+kubectl get endpoints <service-name>
+
+# Test from ingress controller
+kubectl exec -n ingress-nginx <controller-pod> -- curl http://<service>:<port>
+```
+
+### TLS Certificate Issues
+
+```bash
+# Check certificate
+kubectl get certificate
+kubectl describe certificate <cert-name>
+
+# Check secret
+kubectl get secret <tls-secret-name>
+kubectl describe secret <tls-secret-name>
+
+# Check cert-manager logs
+kubectl logs -n cert-manager deploy/cert-manager
+```
+
+### HTTPRoute Not Working
+
+```bash
+# Check HTTPRoute resource
+kubectl get httproute
+kubectl describe httproute <httproute-name>
+
+# Check Gateway
+kubectl get gateway -A
+kubectl describe gateway <gateway-name> -n <namespace>
+
+# Check Gateway controller
+kubectl get pods -n envoy-gateway-system
+kubectl logs -n envoy-gateway-system <gateway-pod>
+```
+
+## Next Steps
+
+<CardGroup cols={2}>
+  <Card title="Values Configuration" icon="file-lines" href="/configuration/values">
+    Learn about values.yaml basics
+  </Card>
+  <Card title="Customization" icon="wrench" href="/configuration/customization">
+    Advanced customization techniques
+  </Card>
+  <Card title="Monitoring" icon="chart-line" href="/configuration/monitoring">
+    Set up Prometheus monitoring
+  </Card>
+  <Card title="Chart Reference" icon="shield" href="/reference/overview">
+    Security best practices
+  </Card>
+</CardGroup>

@@ -1,0 +1,425 @@
+---
+title: Selenium
+description: Selenium Grid for browser automation and testing
+---
+
+Selenium Grid allows you to run browser automation tests in parallel across different browsers and operating systems.
+
+## Overview
+
+This chart deploys a Selenium Grid consisting of a hub and optional Chrome and Firefox nodes, supporting both standard and debug (VNC-enabled) variants.
+
+**Upstream project**: [https://github.com/SeleniumHQ/docker-selenium](https://github.com/SeleniumHQ/docker-selenium)
+
+<Warning>
+This chart is based on the deprecated stable/selenium chart and uses Selenium 3.x. Consider using newer Selenium Grid 4 deployments for production.
+</Warning>
+
+## Installation
+
+```bash
+helm repo add douban https://douban.github.io/charts/
+helm repo update
+helm install selenium douban/selenium
+```
+
+## Components
+
+### Hub
+
+The Selenium Hub coordinates test execution across nodes:
+
+```yaml
+hub:
+  image: "selenium/hub"
+  tag: "3.141.59"
+  port: 4444
+  serviceType: "LoadBalancer"
+  javaOpts: "-Xmx400m"
+  resources:
+    limits:
+      cpu: ".5"
+      memory: "512Mi"
+```
+
+### Chrome Node
+
+Chrome browser nodes:
+
+```yaml
+chrome:
+  enabled: true
+  replicas: 1
+  image: "selenium/node-chrome"
+  tag: "3.141.59"
+  javaOpts: "-Xmx900m"
+  resources:
+    limits:
+      cpu: ".5"
+      memory: "1000Mi"
+```
+
+### Firefox Node
+
+Firefox browser nodes:
+
+```yaml
+firefox:
+  enabled: true
+  replicas: 1
+  image: "selenium/node-firefox"
+  tag: "3.141.59"
+  javaOpts: "-Xmx900m"
+  resources:
+    limits:
+      cpu: ".5"
+      memory: "1000Mi"
+```
+
+### Debug Nodes (VNC)
+
+Debug nodes with VNC for visual debugging:
+
+```yaml
+chromeDebug:
+  enabled: true
+  replicas: 1
+  image: "selenium/node-chrome-debug"
+  tag: "3.141.59"
+  resources:
+    limits:
+      memory: "1500Mi"
+
+firefoxDebug:
+  enabled: true
+  replicas: 1
+  image: "selenium/node-firefox-debug"
+  tag: "3.141.59"
+  resources:
+    limits:
+      memory: "1500Mi"
+```
+
+## Configuration
+
+### Hub Configuration
+
+```yaml
+hub:
+  image: "selenium/hub"
+  tag: "3.141.59"
+  pullPolicy: "IfNotPresent"
+  port: 4444
+  servicePort: 4444
+  serviceType: "LoadBalancer"
+  
+  # Grid configuration
+  gridTimeout: 30  # seconds
+  gridBrowserTimeout: 0  # seconds
+  gridMaxSession: 5
+  gridNewSessionWaitTimeout: -1
+  
+  javaOpts: "-Xmx400m"
+  
+  resources:
+    limits:
+      cpu: ".5"
+      memory: "512Mi"
+```
+
+### Node Configuration
+
+Shared memory configuration for Chrome:
+
+```yaml
+chrome:
+  enabled: true
+  replicas: 3
+  
+  # Shared memory volume (required for Chrome)
+  volumes:
+    - name: dshm
+      emptyDir:
+        medium: Memory
+  volumeMounts:
+    - mountPath: /dev/shm
+      name: dshm
+  
+  nodeMaxInstances: 1
+  nodeMaxSession: 1
+  screenWidth: 1920
+  screenHeight: 1080
+  screenDepth: 24
+```
+
+### DaemonSet Mode
+
+Run nodes as DaemonSet (one per Kubernetes node):
+
+```yaml
+chrome:
+  enabled: true
+  runAsDaemonSet: true
+  # replicas is ignored in DaemonSet mode
+```
+
+### Session Management
+
+Wait for running sessions before termination:
+
+```yaml
+chrome:
+  waitForRunningSessions: true
+  enableLivenessProbe: true
+```
+
+## Access Configuration
+
+### Ingress
+
+```yaml
+hub:
+  ingress:
+    enabled: true
+    className: 'nginx'
+    annotations:
+      cert-manager.io/cluster-issuer: "letsencrypt"
+    path: /
+    hosts:
+      - selenium-hub.example.com
+    tls:
+      - secretName: selenium-hub-tls
+        hosts:
+          - selenium-hub.example.com
+```
+
+### Service Types
+
+```yaml
+hub:
+  serviceType: "LoadBalancer"  # or ClusterIP, NodePort
+  # For LoadBalancer:
+  # serviceLoadBalancerIP: "40.121.183.52"
+  # loadBalancerSourceRanges:
+  #   - "10.0.0.0/8"
+```
+
+## Example Values
+
+### Minimal Setup (Chrome Only)
+
+```yaml
+hub:
+  image: "selenium/hub"
+  tag: "3.141.59"
+  serviceType: "ClusterIP"
+
+chrome:
+  enabled: true
+  replicas: 2
+  image: "selenium/node-chrome"
+  tag: "3.141.59"
+
+firefox:
+  enabled: false
+
+chromeDebug:
+  enabled: false
+
+firefoxDebug:
+  enabled: false
+```
+
+### Multi-Browser Grid
+
+```yaml
+hub:
+  image: "selenium/hub"
+  tag: "3.141.59"
+  serviceType: "LoadBalancer"
+  gridMaxSession: 10
+  gridTimeout: 60
+  javaOpts: "-Xmx512m"
+  resources:
+    limits:
+      cpu: "1"
+      memory: "1Gi"
+
+chrome:
+  enabled: true
+  replicas: 3
+  javaOpts: "-Xmx1000m"
+  nodeMaxInstances: 2
+  resources:
+    limits:
+      cpu: "1"
+      memory: "1500Mi"
+
+firefox:
+  enabled: true
+  replicas: 2
+  javaOpts: "-Xmx1000m"
+  nodeMaxInstances: 2
+  resources:
+    limits:
+      cpu: "1"
+      memory: "1500Mi"
+
+chromeDebug:
+  enabled: true
+  replicas: 1
+
+firefoxDebug:
+  enabled: true
+  replicas: 1
+```
+
+### Production Setup with Autoscaling
+
+```yaml
+global:
+  nodeSelector:
+    workload: selenium
+  affinity:
+    podAntiAffinity:
+      preferredDuringSchedulingIgnoredDuringExecution:
+        - weight: 100
+          podAffinityTerm:
+            topologyKey: kubernetes.io/hostname
+
+hub:
+  image: "selenium/hub"
+  tag: "3.141.59"
+  serviceType: "ClusterIP"
+  port: 4444
+  
+  gridMaxSession: 20
+  gridTimeout: 120
+  gridBrowserTimeout: 90
+  
+  javaOpts: "-Xmx1g"
+  
+  resources:
+    limits:
+      cpu: "2"
+      memory: "2Gi"
+    requests:
+      cpu: "1"
+      memory: "1Gi"
+  
+  ingress:
+    enabled: true
+    className: "nginx"
+    annotations:
+      cert-manager.io/cluster-issuer: "letsencrypt-prod"
+    hosts:
+      - selenium.example.com
+    tls:
+      - secretName: selenium-tls
+        hosts:
+          - selenium.example.com
+
+chrome:
+  enabled: true
+  replicas: 5
+  
+  javaOpts: "-Xmx1500m"
+  
+  nodeMaxInstances: 3
+  nodeMaxSession: 3
+  
+  waitForRunningSessions: true
+  enableLivenessProbe: true
+  
+  volumes:
+    - name: dshm
+      emptyDir:
+        medium: Memory
+        sizeLimit: 2Gi
+  volumeMounts:
+    - mountPath: /dev/shm
+      name: dshm
+  
+  resources:
+    limits:
+      cpu: "2"
+      memory: "2Gi"
+    requests:
+      cpu: "1"
+      memory: "1Gi"
+
+firefox:
+  enabled: true
+  replicas: 3
+  
+  javaOpts: "-Xmx1500m"
+  
+  nodeMaxInstances: 3
+  nodeMaxSession: 3
+  
+  waitForRunningSessions: true
+  enableLivenessProbe: true
+  
+  resources:
+    limits:
+      cpu: "2"
+      memory: "2Gi"
+    requests:
+      cpu: "1"
+      memory: "1Gi"
+
+chromeDebug:
+  enabled: false
+
+firefoxDebug:
+  enabled: false
+```
+
+## Key Parameters
+
+| Parameter | Description | Default |
+|-----------|-------------|----------|
+| `hub.image` | Hub image | `selenium/hub` |
+| `hub.tag` | Hub image tag | `3.141.59` |
+| `hub.serviceType` | Hub service type | `LoadBalancer` |
+| `hub.gridMaxSession` | Max concurrent sessions | `5` |
+| `chrome.enabled` | Enable Chrome nodes | `false` |
+| `chrome.replicas` | Chrome node replicas | `1` |
+| `firefox.enabled` | Enable Firefox nodes | `false` |
+| `firefox.replicas` | Firefox node replicas | `1` |
+| `chromeDebug.enabled` | Enable Chrome debug nodes | `false` |
+| `firefoxDebug.enabled` | Enable Firefox debug nodes | `false` |
+
+## Grid Configuration
+
+| Parameter | Description |
+|-----------|-------------|
+| `gridTimeout` | Session timeout in seconds |
+| `gridBrowserTimeout` | Browser command timeout |
+| `gridMaxSession` | Max concurrent sessions |
+| `gridNewSessionWaitTimeout` | Wait time for new sessions |
+| `gridCleanUpCycle` | Cleanup cycle in ms |
+
+## Using Debug Nodes
+
+Connect to debug nodes via VNC to see browser actions:
+
+1. Port-forward to the debug node:
+   ```bash
+   kubectl port-forward pod/selenium-chrome-debug-xxx 5900:5900
+   ```
+
+2. Connect with VNC client to `localhost:5900` (password: `secret`)
+
+## Requirements
+
+- Kubernetes 1.5+
+- Helm 3+
+- Sufficient memory for browser nodes (1-2GB per replica)
+
+## Deprecation Notice
+
+This chart uses Selenium 3.x which is outdated. For new deployments, consider:
+- Selenium Grid 4 (official Helm charts available)
+- Managed services like Sauce Labs, BrowserStack
+- Playwright or Cypress for modern testing alternatives

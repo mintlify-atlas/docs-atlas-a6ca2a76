@@ -1,0 +1,268 @@
+---
+title: Tinyproxy Exporter
+description: Export Tinyproxy HTTP proxy metrics to Prometheus
+---
+
+The Tinyproxy Exporter chart deploys a Prometheus exporter for [Tinyproxy](https://tinyproxy.github.io/), a lightweight HTTP/HTTPS proxy daemon, enabling monitoring of proxy connections, requests, and performance.
+
+## What It Monitors
+
+This exporter collects metrics from Tinyproxy including:
+
+- Active connections
+- Connection states
+- Request counts
+- Proxy performance metrics
+- Client statistics
+
+## Installation
+
+### Prerequisites
+
+You need a running Tinyproxy instance with stats enabled.
+
+### Basic Installation
+
+```bash
+helm repo add douban https://douban.github.io/charts
+helm install tinyproxy-exporter douban/tinyproxy-exporter \
+  --set tinyproxy.address="tinyproxy:8888"
+```
+
+## Configuration
+
+<ParamField path="tinyproxy.address" type="string" default="10.1.136.37:8881" required>
+  The address of the Tinyproxy stats endpoint (host:port format)
+</ParamField>
+
+<ParamField path="image.repository" type="string" default="ghcr.io/leoquote/tinyproxy_exporter">
+  Container image repository
+</ParamField>
+
+<ParamField path="image.tag" type="string" default="master">
+  Container image tag
+</ParamField>
+
+<ParamField path="service.port" type="number" default="9240">
+  Port to expose exporter metrics on
+</ParamField>
+
+## Tinyproxy Configuration
+
+Ensure Tinyproxy is configured to expose statistics. In your `tinyproxy.conf`:
+
+```conf
+# Enable statistics
+StatHost "tinyproxy.stats"
+StatFile "/usr/share/tinyproxy/stats.html"
+```
+
+The exporter connects to Tinyproxy's stats page to collect metrics.
+
+## ServiceMonitor Configuration
+
+To enable automatic Prometheus scraping via the Prometheus Operator:
+
+```yaml
+serviceMonitor:
+  enabled: true
+  interval: 30s
+  labels:
+    prometheus: kube-prometheus
+```
+
+<ParamField path="serviceMonitor.enabled" type="boolean" default="false">
+  Enable ServiceMonitor resource creation
+</ParamField>
+
+<ParamField path="serviceMonitor.interval" type="string" default="30s">
+  How frequently Prometheus should scrape
+</ParamField>
+
+<ParamField path="serviceMonitor.timeout" type="string" default="10s">
+  Scrape timeout duration
+</ParamField>
+
+## Manual Prometheus Configuration
+
+If not using the Prometheus Operator, add this scrape config:
+
+```yaml
+scrape_configs:
+  - job_name: 'tinyproxy-exporter'
+    static_configs:
+      - targets: ['tinyproxy-exporter:9240']
+    scrape_interval: 30s
+```
+
+## Prometheus Rules
+
+Example alerting rules:
+
+```yaml
+prometheusRule:
+  enabled: true
+  rules:
+    - alert: TinyproxyDown
+      expr: tinyproxy_up == 0
+      for: 2m
+      labels:
+        severity: critical
+      annotations:
+        summary: Tinyproxy is down
+        description: "Tinyproxy instance {{ $labels.instance }} is unreachable"
+    
+    - alert: TinyproxyHighConnections
+      expr: tinyproxy_connections_open > 100
+      for: 5m
+      labels:
+        severity: warning
+      annotations:
+        summary: High number of proxy connections
+        description: "Tinyproxy has {{ $value }} open connections"
+    
+    - alert: TinyproxyNoConnections
+      expr: tinyproxy_connections_open == 0
+      for: 10m
+      labels:
+        severity: info
+      annotations:
+        summary: No proxy connections
+        description: "Tinyproxy has no active connections for 10 minutes"
+```
+
+## Example Values
+
+```yaml
+replicaCount: 1
+
+tinyproxy:
+  address: "tinyproxy.default.svc.cluster.local:8888"
+
+image:
+  repository: ghcr.io/leoquote/tinyproxy_exporter
+  tag: "master"
+  pullPolicy: IfNotPresent
+
+service:
+  type: ClusterIP
+  port: 9240
+
+serviceMonitor:
+  enabled: true
+  interval: 30s
+  labels:
+    release: prometheus
+
+resources:
+  limits:
+    cpu: 50m
+    memory: 64Mi
+  requests:
+    cpu: 25m
+    memory: 32Mi
+```
+
+## Metrics Exposed
+
+Key metrics available at the `/metrics` endpoint:
+
+- `tinyproxy_up` - Whether Tinyproxy is reachable (1 = up, 0 = down)
+- `tinyproxy_connections_open` - Current number of open connections
+- `tinyproxy_connections_refused` - Total refused connections
+- `tinyproxy_requests_total` - Total proxy requests handled
+- `tinyproxy_denied_total` - Total denied requests
+
+## Use Cases
+
+### Connection Monitoring
+
+Monitor proxy connection patterns:
+
+```promql
+# Current open connections
+tinyproxy_connections_open
+
+# Connection rate
+rate(tinyproxy_requests_total[5m])
+
+# Refused connections rate
+rate(tinyproxy_connections_refused[5m])
+```
+
+### Performance Analysis
+
+Analyze proxy performance:
+
+```promql
+# Average connections over time
+avg_over_time(tinyproxy_connections_open[1h])
+
+# Peak connections
+max_over_time(tinyproxy_connections_open[1d])
+```
+
+### Security Monitoring
+
+Monitor for unusual activity:
+
+```promql
+# Denied requests (potential security issues)
+rate(tinyproxy_denied_total[5m])
+
+# Sudden spike in connections
+rate(tinyproxy_connections_open[5m]) > 10
+```
+
+## Deployment Patterns
+
+### Sidecar Pattern
+
+Deploy the exporter as a sidecar to Tinyproxy:
+
+```yaml
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: tinyproxy-with-exporter
+spec:
+  template:
+    spec:
+      containers:
+        - name: tinyproxy
+          image: monokal/tinyproxy:latest
+          ports:
+            - containerPort: 8888
+        - name: exporter
+          image: ghcr.io/leoquote/tinyproxy_exporter:master
+          args:
+            - "--tinyproxy.address=localhost:8888"
+          ports:
+            - containerPort: 9240
+```
+
+### Separate Deployment
+
+Deploy the exporter separately when monitoring multiple Tinyproxy instances.
+
+## Troubleshooting
+
+### Exporter Cannot Connect
+
+If the exporter shows `tinyproxy_up 0`:
+
+1. Verify Tinyproxy is running: `curl http://tinyproxy:8888/`
+2. Check Tinyproxy stats are enabled in config
+3. Verify network connectivity between exporter and Tinyproxy
+4. Check firewall rules and network policies
+
+### No Metrics Appearing
+
+1. Check exporter logs: `kubectl logs deployment/tinyproxy-exporter`
+2. Verify ServiceMonitor labels match Prometheus selector
+3. Check Prometheus targets page for scrape errors
+
+## Resources
+
+- [Tinyproxy Exporter GitHub](https://github.com/igzivkov/tinyproxy_exporter)
+- [Tinyproxy Documentation](https://tinyproxy.github.io/)

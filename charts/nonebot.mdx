@@ -1,0 +1,293 @@
+---
+title: NoneBot
+description: Python chatbot framework for instant messaging platforms
+---
+
+NoneBot is a cross-platform Python asynchronous chatbot framework for building bots on various instant messaging platforms.
+
+## Overview
+
+NoneBot provides a flexible framework for creating chatbots that work across multiple platforms including QQ, Telegram, Discord, and more. It features a plugin system, message handling, and async support.
+
+## Installation
+
+```bash
+helm repo add douban https://douban.github.io/charts/
+helm repo update
+helm install nonebot douban/nonebot
+```
+
+## Configuration
+
+### Basic Configuration
+
+```yaml
+image:
+  repository: your-nonebot-image
+  tag: latest
+  pullPolicy: Always
+
+replicaCount: 1
+
+service:
+  type: ClusterIP
+  port: 8080
+```
+
+<Note>
+This chart expects you to provide your own NoneBot bot image. The default nginx image is a placeholder.
+</Note>
+
+### Environment Configuration
+
+Configure NoneBot via `.env` file mounted to the container:
+
+```yaml
+dotenv: |
+  # Environment (prod/dev)
+  ENVIRONMENT=prod
+  
+  # Driver configuration
+  DRIVER=~fastapi+~httpx+~websockets
+  
+  # Bot configuration
+  SUPERUSERS=["123456789"]
+  NICKNAME=["MyBot"]
+  COMMAND_START=["/", ""]
+  COMMAND_SEP=[".", " "]
+  
+  # Platform adapters
+  # Example for OneBot (QQ)
+  ONEBOT_ACCESS_TOKEN=your_token
+  
+  # Log level
+  LOG_LEVEL=INFO
+```
+
+### Additional Environment Variables
+
+```yaml
+extraEnvs:
+  - name: CUSTOM_CONFIG
+    value: "custom-value"
+  - name: API_TOKEN
+    valueFrom:
+      secretKeyRef:
+        name: nonebot-secrets
+        key: api-token
+```
+
+### Volume Configuration
+
+Mount additional configuration or data:
+
+```yaml
+volumes:
+  - name: plugins
+    configMap:
+      name: nonebot-plugins
+  - name: data
+    persistentVolumeClaim:
+      claimName: nonebot-data
+
+volumeMounts:
+  - name: plugins
+    mountPath: /app/plugins
+    readOnly: true
+  - name: data
+    mountPath: /app/data
+```
+
+## Access Configuration
+
+### Ingress
+
+```yaml
+ingress:
+  enabled: true
+  className: "nginx"
+  annotations:
+    cert-manager.io/cluster-issuer: "letsencrypt"
+  hosts:
+    - host: bot.example.com
+      paths:
+        - path: /
+          pathType: ImplementationSpecific
+  tls:
+    - secretName: nonebot-tls
+      hosts:
+        - bot.example.com
+```
+
+## Example Values
+
+### QQ Bot Setup (OneBot)
+
+```yaml
+image:
+  repository: your-registry/my-qq-bot
+  tag: v1.0.0
+  pullPolicy: IfNotPresent
+
+replicaCount: 1
+
+service:
+  type: ClusterIP
+  port: 8080
+
+dotenv: |
+  ENVIRONMENT=prod
+  DRIVER=~fastapi+~httpx+~websockets
+  
+  # Bot info
+  SUPERUSERS=["123456789"]
+  NICKNAME=["MyQQBot"]
+  COMMAND_START=["/", ""]
+  
+  # OneBot configuration
+  ONEBOT_WS_URLS=["ws://onebot-service:8080"]
+  
+  LOG_LEVEL=INFO
+
+extraEnvs:
+  - name: ONEBOT_ACCESS_TOKEN
+    valueFrom:
+      secretKeyRef:
+        name: onebot-credentials
+        key: access-token
+
+resources:
+  limits:
+    cpu: 500m
+    memory: 512Mi
+  requests:
+    cpu: 100m
+    memory: 128Mi
+```
+
+### Multi-Platform Bot
+
+```yaml
+image:
+  repository: your-registry/multi-platform-bot
+  tag: latest
+  pullPolicy: Always
+
+replicaCount: 1
+
+service:
+  type: ClusterIP
+  port: 8080
+
+dotenv: |
+  ENVIRONMENT=prod
+  DRIVER=~fastapi+~httpx+~websockets
+  
+  SUPERUSERS=["admin_id_1", "admin_id_2"]
+  NICKNAME=["MultiBot"]
+  COMMAND_START=["/", "!", ""]
+  COMMAND_SEP=[".", " "]
+  
+  # Multiple adapters
+  TELEGRAM_BOTS='[{"token": "TOKEN"}]'
+  DISCORD_BOTS='[{"token": "TOKEN"}]'
+  
+  LOG_LEVEL=DEBUG
+
+extraEnvs:
+  - name: TELEGRAM_BOT_TOKEN
+    valueFrom:
+      secretKeyRef:
+        name: bot-tokens
+        key: telegram-token
+  - name: DISCORD_BOT_TOKEN
+    valueFrom:
+      secretKeyRef:
+        name: bot-tokens
+        key: discord-token
+
+volumes:
+  - name: data
+    persistentVolumeClaim:
+      claimName: nonebot-data
+  - name: config
+    configMap:
+      name: nonebot-config
+
+volumeMounts:
+  - name: data
+    mountPath: /app/data
+  - name: config
+    mountPath: /app/config
+    readOnly: true
+
+ingress:
+  enabled: true
+  className: "nginx"
+  hosts:
+    - host: bot-webhook.example.com
+      paths:
+        - path: /
+          pathType: ImplementationSpecific
+
+resources:
+  limits:
+    cpu: 1000m
+    memory: 1Gi
+  requests:
+    cpu: 200m
+    memory: 256Mi
+```
+
+## Key Parameters
+
+| Parameter | Description | Default |
+|-----------|-------------|----------|
+| `image.repository` | Bot image repository | `nginx` |
+| `image.tag` | Image tag | `""` |
+| `replicaCount` | Number of replicas | `1` |
+| `service.port` | Service port | `8080` |
+| `dotenv` | NoneBot .env configuration | See values |
+| `extraEnvs` | Additional environment variables | `[]` |
+
+## NoneBot Configuration
+
+The `dotenv` field maps to `/app/.env` in the container. Key configuration options:
+
+- **ENVIRONMENT** - prod/dev environment
+- **DRIVER** - Message driver (FastAPI, httpx, websockets)
+- **SUPERUSERS** - Bot administrator IDs
+- **NICKNAME** - Bot nicknames
+- **COMMAND_START** - Command prefixes
+- **COMMAND_SEP** - Command separators
+- **LOG_LEVEL** - Logging level
+
+See [NoneBot documentation](https://nonebot.dev/docs/appendices/config) for all configuration options.
+
+## Creating Your Bot Image
+
+Create a Dockerfile for your bot:
+
+```dockerfile
+FROM python:3.11-slim
+
+WORKDIR /app
+
+# Install dependencies
+COPY requirements.txt .
+RUN pip install --no-cache-dir -r requirements.txt
+
+# Copy bot code
+COPY . .
+
+# Install NoneBot plugins
+RUN pip install nonebot-adapter-onebot nonebot-plugin-...
+
+CMD ["python", "bot.py"]
+```
+
+## Requirements
+
+- Kubernetes 1.16+
+- Helm 3+
+- Custom NoneBot bot image

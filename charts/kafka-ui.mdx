@@ -1,0 +1,360 @@
+---
+title: Kafka UI
+description: Web UI for Apache Kafka cluster management and monitoring
+---
+
+Kafka UI (Kafbat UI) is a free, open-source web UI to monitor and manage Apache Kafka clusters.
+
+## Overview
+
+Kafka UI provides a lightweight dashboard for tracking key metrics of Kafka clusters including brokers, topics, partitions, consumer groups, and message browsing with support for multiple serialization formats.
+
+**Upstream project**: [https://github.com/kafbat/kafka-ui](https://github.com/kafbat/kafka-ui)
+
+<Note>
+Kafbat UI (formerly kafka-ui) carries forward the legacy of the UI Apache Kafka project, maintained by the original core contributors.
+</Note>
+
+## Installation
+
+```bash
+helm repo add douban https://douban.github.io/charts/
+helm repo update
+helm install kafka-ui douban/kafka-ui
+```
+
+## Configuration
+
+### Basic Configuration
+
+```yaml
+image:
+  registry: ghcr.io
+  repository: kafbat/kafka-ui
+  tag: ""  # Uses appVersion if not set
+  pullPolicy: IfNotPresent
+
+replicaCount: 1
+
+service:
+  type: ClusterIP
+  port: 80
+```
+
+### Kafka Cluster Configuration
+
+Use YAML-based configuration to define Kafka clusters:
+
+```yaml
+yamlApplicationConfig:
+  kafka:
+    clusters:
+      - name: production
+        bootstrapServers: kafka-broker-1:9092,kafka-broker-2:9092
+      - name: staging
+        bootstrapServers: kafka-staging:9092
+  auth:
+    type: disabled
+  management:
+    health:
+      ldap:
+        enabled: false
+```
+
+### Configuration from ConfigMap
+
+```yaml
+yamlApplicationConfigConfigMap:
+  name: kafka-ui-config
+  keyName: config.yml
+```
+
+### Configuration from Secret
+
+For sensitive configuration:
+
+```yaml
+yamlApplicationConfigSecret:
+  name: kafka-ui-secret
+  keyName: config.yml
+```
+
+### Environment Variables
+
+```yaml
+envs:
+  config:
+    KAFKA_CLUSTERS_0_NAME: production
+    KAFKA_CLUSTERS_0_BOOTSTRAPSERVERS: kafka:9092
+    LOGGING_LEVEL_ROOT: INFO
+  
+  secret:
+    KAFKA_CLUSTERS_0_PROPERTIES_SASL_JAAS_CONFIG: "username password"
+```
+
+### Environment from Secrets
+
+```yaml
+envs:
+  secretMappings:
+    KAFKA_ADMIN_PASSWORD:
+      name: kafka-credentials
+      keyName: admin-password
+  configMappings:
+    KAFKA_BOOTSTRAP:
+      name: kafka-config
+      keyName: bootstrap-servers
+```
+
+### Authentication
+
+Enable OAuth2 or LDAP authentication:
+
+```yaml
+yamlApplicationConfig:
+  spring:
+    security:
+      oauth2:
+        client:
+          registration:
+            github:
+              client-id: your-client-id
+              client-secret: your-client-secret
+```
+
+## Access Configuration
+
+### Ingress
+
+```yaml
+ingress:
+  enabled: true
+  ingressClassName: "nginx"
+  annotations:
+    cert-manager.io/cluster-issuer: "letsencrypt"
+  host: kafka-ui.example.com
+  path: "/"
+  pathType: "Prefix"
+  tls:
+    enabled: true
+    secretName: "kafka-ui-tls"
+```
+
+## Advanced Configuration
+
+### Schema Registry Integration
+
+```yaml
+yamlApplicationConfig:
+  kafka:
+    clusters:
+      - name: production
+        bootstrapServers: kafka:9092
+        schemaRegistry: http://schema-registry:8081
+```
+
+### Multiple Kafka Clusters
+
+```yaml
+yamlApplicationConfig:
+  kafka:
+    clusters:
+      - name: production
+        bootstrapServers: kafka-prod:9092
+        schemaRegistry: http://schema-registry-prod:8081
+      - name: staging  
+        bootstrapServers: kafka-staging:9092
+        schemaRegistry: http://schema-registry-staging:8081
+      - name: development
+        bootstrapServers: kafka-dev:9092
+```
+
+### RBAC Configuration
+
+```yaml
+yamlApplicationConfig:
+  auth:
+    type: oauth2
+  rbac:
+    roles:
+      - name: "admin"
+        clusters:
+          - production
+          - staging
+        permissions:
+          - resource: topic
+            actions: [view, create, edit, delete]
+      - name: "viewer"
+        clusters:
+          - production
+        permissions:
+          - resource: topic
+            actions: [view]
+```
+
+### Data Masking
+
+```yaml
+yamlApplicationConfig:
+  kafka:
+    clusters:
+      - name: production
+        bootstrapServers: kafka:9092
+        masking:
+          - type: REPLACE
+            fields:
+              - email
+              - ssn
+            replacement: "***MASKED***"
+```
+
+## Monitoring
+
+### Service Monitor (Prometheus)
+
+```yaml
+serviceMonitor:
+  enabled: true
+  namespace: monitoring
+  interval: 30s
+  labels:
+    prometheus: kube-prometheus
+```
+
+## Example Values
+
+### Single Cluster Setup
+
+```yaml
+image:
+  registry: ghcr.io
+  repository: kafbat/kafka-ui
+  tag: "v1.2.0"
+
+replicaCount: 2
+
+yamlApplicationConfig:
+  kafka:
+    clusters:
+      - name: main
+        bootstrapServers: kafka-broker:9092
+  auth:
+    type: disabled
+
+ingress:
+  enabled: true
+  ingressClassName: "nginx"
+  host: kafka-ui.example.com
+  path: "/"
+  pathType: "Prefix"
+
+resources:
+  limits:
+    cpu: 500m
+    memory: 512Mi
+  requests:
+    cpu: 200m
+    memory: 256Mi
+```
+
+### Multi-Cluster with Authentication
+
+```yaml
+image:
+  registry: ghcr.io
+  repository: kafbat/kafka-ui
+
+replicaCount: 3
+
+yamlApplicationConfig:
+  kafka:
+    clusters:
+      - name: production
+        bootstrapServers: kafka-prod-1:9092,kafka-prod-2:9092
+        schemaRegistry: http://schema-registry-prod:8081
+        properties:
+          security.protocol: SASL_SSL
+          sasl.mechanism: PLAIN
+      - name: staging
+        bootstrapServers: kafka-staging:9092
+        schemaRegistry: http://schema-registry-staging:8081
+  
+  spring:
+    security:
+      oauth2:
+        client:
+          registration:
+            google:
+              client-id: your-client-id
+              client-secret: your-secret
+              scope:
+                - email
+                - profile
+
+envs:
+  secretMappings:
+    KAFKA_CLUSTERS_0_PROPERTIES_SASL_JAAS_CONFIG:
+      name: kafka-sasl-secret
+      keyName: jaas-config
+
+ingress:
+  enabled: true
+  ingressClassName: "nginx"
+  annotations:
+    cert-manager.io/cluster-issuer: "letsencrypt-prod"
+  host: kafka.example.com
+  tls:
+    enabled: true
+    secretName: kafka-ui-tls
+
+resources:
+  limits:
+    cpu: 1000m
+    memory: 1Gi
+  requests:
+    cpu: 500m
+    memory: 512Mi
+
+autoscaling:
+  enabled: true
+  minReplicas: 2
+  maxReplicas: 5
+  targetCPUUtilizationPercentage: 80
+```
+
+## Key Parameters
+
+| Parameter | Description | Default |
+|-----------|-------------|----------|
+| `image.registry` | Image registry | `ghcr.io` |
+| `image.repository` | Image repository | `kafbat/kafka-ui` |
+| `replicaCount` | Number of replicas | `1` |
+| `service.port` | Service port | `80` |
+| `yamlApplicationConfig` | Kafka UI configuration | `{}` |
+| `ingress.enabled` | Enable ingress | `false` |
+
+## Features
+
+- Multi-cluster management
+- Performance monitoring with metrics dashboard
+- Topic and partition management
+- Consumer group monitoring
+- Message browsing (JSON, Avro, Protobuf)
+- Dynamic topic configuration
+- Schema registry integration
+- Role-based access control (RBAC)
+- Data masking for sensitive data
+- OAuth2/LDAP authentication
+
+## Requirements
+
+- Kubernetes 1.18+
+- Helm 3+
+- Access to Kafka cluster(s)
+
+## Additional Resources
+
+- [Configuration Guide](https://ui.docs.kafbat.io/configuration/configuration-file)
+- [Authentication Setup](https://ui.docs.kafbat.io/configuration/authentication)
+- [RBAC Configuration](https://ui.docs.kafbat.io/configuration/rbac-role-based-access-control)
+- [Serialization/Deserialization](https://ui.docs.kafbat.io/configuration/serialization-serde)

@@ -1,0 +1,110 @@
+---
+title: Introduction
+description: Welcome to the Douban Helm Charts repository - production-ready Kubernetes charts for common applications
+---
+
+## Overview
+
+Douban Helm Charts is a collection of production-ready Helm charts maintained by Douban. These charts are designed to simplify the deployment and management of various applications on Kubernetes clusters.
+
+<Note>
+  All charts in this repository are actively maintained and battle-tested in production environments.
+</Note>
+
+## What are Helm Charts?
+
+Helm is the package manager for Kubernetes. Helm Charts are packages of pre-configured Kubernetes resources that you can deploy with a single command. They help you:
+
+- **Define** your application's Kubernetes resources
+- **Install** and upgrade applications consistently
+- **Share** configurations across teams
+- **Manage** dependencies between applications
+
+## Available Charts
+
+The Douban Charts repository includes a variety of charts for different use cases:
+
+<CardGroup cols={2}>
+  <Card title="nginx" icon="server">
+    General-purpose web service deployment for serving web applications and static content
+  </Card>
+  
+  <Card title="helpdesk" icon="ticket">
+    Self-service helpdesk system based on multiple providers (StackStorm, Airflow, Spincycle)
+  </Card>
+  
+  <Card title="overlord" icon="database">
+    Distributed caching service based on Bilibili's Overlord project
+  </Card>
+  
+  <Card title="dify" icon="robot">
+    LLM app development platform
+  </Card>
+  
+  <Card title="kafka-ui" icon="table">
+    Web UI for Apache Kafka management
+  </Card>
+  
+  <Card title="prometheus-exporters" icon="chart-line">
+    Collection of exporters for cloud providers (Aliyun, Tencent Cloud, Qiniu, UCloud, Upyun)
+  </Card>
+</CardGroup>
+
+## Key Features
+
+### Production-Ready
+All charts are tested and used in production environments, ensuring reliability and stability.
+
+### CI/CD Integration
+Automated testing and release pipelines ensure quality and consistency across all chart versions.
+
+### Flexible Configuration
+Extensive values.yaml files allow you to customize deployments to match your specific requirements.
+
+### Monitoring & Observability
+Many charts include optional ServiceMonitor and PrometheusRule resources for seamless integration with Prometheus.
+
+## Repository Information
+
+<CodeGroup>
+```bash Repository URL
+https://douban.github.io/charts/
+```
+
+```bash GitHub Source
+https://github.com/douban/charts
+```
+</CodeGroup>
+
+## Chart Versioning
+
+Each chart follows semantic versioning:
+
+- **Chart Version**: Incremented when chart templates or configurations change
+- **App Version**: Reflects the version of the application being deployed
+
+You can view the version information for any chart:
+
+```bash
+helm show chart douban/nginx
+```
+
+## Community & Support
+
+The Douban Charts project is open source and welcomes contributions:
+
+- **Issues**: Report bugs or request features on [GitHub Issues](https://github.com/douban/charts/issues)
+- **Pull Requests**: Contribute improvements or new charts
+- **Discussions**: Join the community to ask questions and share experiences
+
+## Next Steps
+
+<CardGroup cols={2}>
+  <Card title="Quick Start" icon="bolt" href="/quickstart">
+    Get started with your first chart deployment in minutes
+  </Card>
+  
+  <Card title="Installation Guide" icon="download" href="/installation">
+    Learn detailed installation and configuration options
+  </Card>
+</CardGroup>

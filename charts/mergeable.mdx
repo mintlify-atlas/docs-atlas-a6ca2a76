@@ -1,0 +1,266 @@
+---
+title: Mergeable
+description: GitHub PR validation and automation bot
+---
+
+Mergeable is a GitHub bot that validates and enforces policies on pull requests.
+
+## Overview
+
+Mergeable helps maintain PR quality by automating checks and enforcing team policies. It can validate PR titles, labels, descriptions, and more based on customizable rules.
+
+**Upstream project**: [https://github.com/mergeability/mergeable](https://github.com/mergeability/mergeable)
+
+## Installation
+
+<Steps>
+  <Step title="Create GitHub App">
+    Create a GitHub App with appropriate permissions for your organization or repository.
+  </Step>
+
+  <Step title="Create PEM secret">
+    Store your GitHub App private key as a Kubernetes secret:
+
+    ```bash
+    kubectl create secret generic mergeable \
+      --from-file=private-key.pem=./your-app-key.pem
+    ```
+  </Step>
+
+  <Step title="Install the chart">
+    ```bash
+    helm repo add douban https://douban.github.io/charts/
+    helm repo update
+    helm install mergeable douban/mergeable
+    ```
+  </Step>
+</Steps>
+
+## Configuration
+
+### Basic Configuration
+
+```yaml
+image:
+  repository: "ghcr.io/leoquote/mergeable"
+  tag: "latest"
+  pullPolicy: IfNotPresent
+
+replicaCount: 1
+
+service:
+  type: ClusterIP
+  port: 80
+```
+
+### GitHub App Configuration
+
+Configure your GitHub App credentials:
+
+```yaml
+ContainerEnvs:
+  - name: APP_ID
+    value: "123456"  # Your GitHub App ID
+  - name: GHE_HOST
+    value: github.com  # or your GHE instance
+  - name: LOG_LEVEL
+    value: info
+  - name: WEBHOOK_SECRET
+    value: "your-webhook-secret"
+
+# Name of secret containing private-key.pem
+pemSecretName: mergeable
+```
+
+### Using GitHub Enterprise
+
+```yaml
+ContainerEnvs:
+  - name: APP_ID
+    value: "123456"
+  - name: GHE_HOST
+    value: github.example.com
+  - name: WEBHOOK_SECRET
+    valueFrom:
+      secretKeyRef:
+        name: mergeable-secrets
+        key: webhook-secret
+```
+
+## Access Configuration
+
+### Ingress
+
+```yaml
+ingress:
+  enabled: true
+  className: "nginx"
+  annotations:
+    cert-manager.io/cluster-issuer: "letsencrypt"
+  hosts:
+    - host: mergeable.example.com
+      paths:
+        - path: /
+          pathType: ImplementationSpecific
+  tls:
+    - secretName: mergeable-tls
+      hosts:
+        - mergeable.example.com
+```
+
+## Example Values
+
+### Minimal Setup
+
+```yaml
+image:
+  repository: "ghcr.io/leoquote/mergeable"
+  tag: "latest"
+
+ContainerEnvs:
+  - name: APP_ID
+    value: "123456"
+  - name: GHE_HOST
+    value: github.com
+  - name: LOG_LEVEL
+    value: info
+  - name: WEBHOOK_SECRET
+    value: "my-webhook-secret"
+
+pemSecretName: mergeable
+
+ingress:
+  enabled: true
+  className: "nginx"
+  hosts:
+    - host: mergeable-bot.example.com
+      paths:
+        - path: /
+          pathType: ImplementationSpecific
+```
+
+### Production Setup with Secrets
+
+```yaml
+image:
+  repository: "ghcr.io/leoquote/mergeable"
+  tag: "v1.0.0"
+  pullPolicy: IfNotPresent
+
+replicaCount: 2
+
+ContainerEnvs:
+  - name: APP_ID
+    valueFrom:
+      secretKeyRef:
+        name: mergeable-github-app
+        key: app-id
+  - name: GHE_HOST
+    value: github.example.com
+  - name: LOG_LEVEL
+    value: warn
+  - name: WEBHOOK_SECRET
+    valueFrom:
+      secretKeyRef:
+        name: mergeable-github-app
+        key: webhook-secret
+  - name: WEBHOOK_PROXY_URL
+    value: https://smee.io/your-channel
+
+pemSecretName: mergeable-pem
+
+service:
+  type: ClusterIP
+  port: 80
+
+ingress:
+  enabled: true
+  className: "nginx"
+  annotations:
+    cert-manager.io/cluster-issuer: "letsencrypt-prod"
+    nginx.ingress.kubernetes.io/rate-limit: "100"
+  hosts:
+    - host: mergeable.example.com
+      paths:
+        - path: /
+          pathType: ImplementationSpecific
+  tls:
+    - secretName: mergeable-tls
+      hosts:
+        - mergeable.example.com
+
+resources:
+  limits:
+    cpu: 500m
+    memory: 512Mi
+  requests:
+    cpu: 100m
+    memory: 128Mi
+
+autoscaling:
+  enabled: true
+  minReplicas: 2
+  maxReplicas: 5
+  targetCPUUtilizationPercentage: 80
+```
+
+## Key Parameters
+
+| Parameter | Description | Default |
+|-----------|-------------|----------|
+| `image.repository` | Mergeable image | `ghcr.io/leoquote/mergeable` |
+| `image.tag` | Image tag | `latest` |
+| `replicaCount` | Number of replicas | `1` |
+| `service.port` | Service port | `80` |
+| `pemSecretName` | Secret containing private key | `mergeable` |
+| `ContainerEnvs` | Environment variables | `[]` |
+
+## Environment Variables
+
+| Variable | Description | Required |
+|----------|-------------|----------|
+| `APP_ID` | GitHub App ID | Yes |
+| `GHE_HOST` | GitHub/GHE hostname | Yes |
+| `WEBHOOK_SECRET` | Webhook secret | Yes |
+| `LOG_LEVEL` | Logging level (info/debug/warn/error) | No |
+| `WEBHOOK_PROXY_URL` | Smee.io proxy URL for development | No |
+
+## Private Key Secret
+
+The private key secret must contain a file named `private-key.pem`:
+
+```bash
+# Create from PEM file
+kubectl create secret generic mergeable \
+  --from-file=private-key.pem=./your-github-app.pem
+
+# Or from literal value
+kubectl create secret generic mergeable \
+  --from-literal=private-key.pem="$(cat your-github-app.pem)"
+```
+
+## Mergeable Configuration
+
+Configure Mergeable rules in your repository via `.github/mergeable.yml`. See the [upstream documentation](https://github.com/mergeability/mergeable) for rule configuration.
+
+Example `.github/mergeable.yml`:
+
+```yaml
+version: 2
+mergeable:
+  - when: pull_request.*
+    validate:
+      - do: title
+        must_exclude:
+          regex: ^\[WIP\]
+      - do: label
+        must_include:
+          regex: 'ready'
+```
+
+## Requirements
+
+- Kubernetes 1.16+
+- Helm 3+
+- GitHub App with appropriate permissions
+- Webhook endpoint accessible from GitHub

@@ -1,0 +1,258 @@
+---
+title: UCloud Exporter
+description: Export UCloud metrics to Prometheus
+---
+
+The UCloud Exporter chart deploys a Prometheus exporter for [UCloud](https://www.ucloud.cn/) services, enabling monitoring of your UCloud infrastructure.
+
+## What It Monitors
+
+This exporter collects metrics from UCloud services including:
+
+- UHost - Virtual machine instances
+- UDB - Managed database services
+- ULB - Load balancer metrics
+- UDisk - Cloud disk storage
+- UMem - Managed Redis/Memcache
+- Other UCloud products
+
+## Installation
+
+### Prerequisites
+
+You need UCloud API credentials (PublicKey and PrivateKey).
+
+### Basic Installation
+
+```bash
+helm repo add douban https://douban.github.io/charts
+helm install ucloud-exporter douban/ucloud-exporter
+```
+
+## Authentication Configuration
+
+<Warning>
+  Never commit UCloud credentials to version control. Always use Kubernetes secrets or external secret management solutions.
+</Warning>
+
+### Using Environment Variables
+
+Configure credentials securely:
+
+```yaml
+extraEnvs:
+  - name: UCLOUD_PUBLIC_KEY
+    valueFrom:
+      secretKeyRef:
+        name: ucloud-credentials
+        key: public-key
+  - name: UCLOUD_PRIVATE_KEY
+    valueFrom:
+      secretKeyRef:
+        name: ucloud-credentials
+        key: private-key
+  - name: UCLOUD_REGION
+    value: "cn-bj2"
+  - name: UCLOUD_PROJECT_ID
+    value: "your-project-id"
+```
+
+<ParamField path="extraEnvs" type="array" default="[]">
+  Environment variables for credentials and configuration
+</ParamField>
+
+### Create Credentials Secret
+
+```bash
+kubectl create secret generic ucloud-credentials \
+  --from-literal=public-key="YOUR_PUBLIC_KEY" \
+  --from-literal=private-key="YOUR_PRIVATE_KEY"
+```
+
+## Configuration
+
+<ParamField path="args" type="array" default="[]">
+  Additional command-line arguments for the exporter
+</ParamField>
+
+<ParamField path="image.repository" type="string" default="ghcr.io/douban/ucloud-exporter">
+  Container image repository
+</ParamField>
+
+<ParamField path="image.tag" type="string" default="main">
+  Container image tag
+</ParamField>
+
+<ParamField path="containerPort" type="number" default="9200">
+  Port the exporter listens on
+</ParamField>
+
+<ParamField path="service.port" type="number" default="9200">
+  Service port to expose metrics
+</ParamField>
+
+## ServiceMonitor Configuration
+
+For automatic Prometheus scraping via the Prometheus Operator:
+
+```yaml
+serviceMonitor:
+  enabled: true
+  interval: 60s
+  labels:
+    prometheus: kube-prometheus
+```
+
+<ParamField path="serviceMonitor.enabled" type="boolean" default="false">
+  Enable ServiceMonitor resource creation
+</ParamField>
+
+<ParamField path="serviceMonitor.interval" type="string" default="30s">
+  Scrape interval (60s recommended for cloud APIs)
+</ParamField>
+
+<ParamField path="serviceMonitor.timeout" type="string" default="10s">
+  Scrape timeout
+</ParamField>
+
+## Manual Prometheus Configuration
+
+If not using the Prometheus Operator:
+
+```yaml
+scrape_configs:
+  - job_name: 'ucloud-exporter'
+    static_configs:
+      - targets: ['ucloud-exporter:9200']
+    scrape_interval: 60s
+    scrape_timeout: 30s
+```
+
+## Example Values
+
+```yaml
+replicaCount: 1
+
+image:
+  repository: ghcr.io/douban/ucloud-exporter
+  tag: "main"
+  pullPolicy: IfNotPresent
+
+extraEnvs:
+  - name: UCLOUD_PUBLIC_KEY
+    valueFrom:
+      secretKeyRef:
+        name: ucloud-credentials
+        key: public-key
+  - name: UCLOUD_PRIVATE_KEY
+    valueFrom:
+      secretKeyRef:
+        name: ucloud-credentials
+        key: private-key
+  - name: UCLOUD_REGION
+    value: "cn-bj2"
+  - name: UCLOUD_PROJECT_ID
+    value: "org-abc123"
+
+service:
+  type: ClusterIP
+  port: 9200
+
+serviceMonitor:
+  enabled: true
+  interval: 60s
+  timeout: 30s
+  labels:
+    release: prometheus
+
+resources:
+  limits:
+    cpu: 200m
+    memory: 256Mi
+  requests:
+    cpu: 100m
+    memory: 128Mi
+```
+
+## Metrics Exposed
+
+Metrics are available at the `/metrics` endpoint:
+
+- `ucloud_uhost_cpu_usage` - UHost CPU usage percentage
+- `ucloud_uhost_memory_usage` - UHost memory usage
+- `ucloud_uhost_disk_usage` - UHost disk usage
+- `ucloud_udb_connections` - Database connections
+- `ucloud_udb_qps` - Database queries per second
+- `ucloud_ulb_connections` - Load balancer connections
+- `ucloud_udisk_iops` - Disk IOPS
+
+## Prometheus Rules
+
+Example alerting rules:
+
+```yaml
+prometheusRule:
+  enabled: true
+  rules:
+    - alert: UCloudHighCPU
+      expr: ucloud_uhost_cpu_usage > 80
+      for: 5m
+      labels:
+        severity: warning
+      annotations:
+        summary: High CPU usage on UHost
+        description: "UHost {{ $labels.instance_id }} CPU usage is {{ $value }}%"
+    
+    - alert: UCloudDatabaseConnections
+      expr: ucloud_udb_connections > 1000
+      for: 5m
+      labels:
+        severity: warning
+      annotations:
+        summary: High database connections
+        description: "UDB {{ $labels.db_id }} has {{ $value }} connections"
+```
+
+## Use Cases
+
+### Infrastructure Monitoring
+
+Monitor your UCloud infrastructure:
+
+```promql
+# Average CPU usage across all UHosts
+avg(ucloud_uhost_cpu_usage)
+
+# Instances with high memory usage
+ucloud_uhost_memory_usage > 80
+```
+
+### Database Performance
+
+Track database performance:
+
+```promql
+# Database QPS
+sum by (db_id) (ucloud_udb_qps)
+
+# Connection pool usage
+ucloud_udb_connections / ucloud_udb_max_connections
+```
+
+## Security Best Practices
+
+<Warning>
+  Follow these security guidelines:
+</Warning>
+
+1. **Use sub-accounts** - Create dedicated API credentials with minimal permissions
+2. **Read-only access** - Grant only monitoring/describe permissions
+3. **Rotate credentials** - Change API keys regularly
+4. **Use Kubernetes secrets** - Never hardcode credentials in values files
+5. **Network policies** - Restrict network access to the exporter
+6. **Audit logging** - Enable API audit logs in UCloud console
+
+## Resources
+
+- [UCloud Exporter GitHub](https://github.com/douban/ucloud-exporter)
+- [UCloud API Documentation](https://docs.ucloud.cn/)

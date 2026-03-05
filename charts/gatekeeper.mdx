@@ -1,0 +1,546 @@
+---
+title: Gatekeeper
+description: Policy enforcement and admission control for Kubernetes using Open Policy Agent
+---
+
+Gatekeeper is a validating and mutating webhook that enforces OPA (Open Policy Agent) policies on Kubernetes resources. It enables policy-as-code for your cluster.
+
+## Overview
+
+Gatekeeper provides:
+
+- **Policy Enforcement**: Validate and mutate resources based on custom policies
+- **Admission Control**: Block non-compliant resources at creation time
+- **Audit Functionality**: Scan existing resources for policy violations
+- **Constraint Templates**: Reusable policy definitions using Rego
+- **Mutation**: Automatically modify resources to meet compliance requirements
+
+## Prerequisites
+
+- Kubernetes cluster v1.20+
+- Cluster-admin permissions
+- Helm 3.x
+- Understanding of OPA Rego language (for writing policies)
+
+<Warning>
+  Gatekeeper is a cluster-wide admission controller. Misconfigured policies can prevent resource creation across the entire cluster. Always test policies thoroughly before enforcing them.
+</Warning>
+
+## Installation
+
+### Basic Installation
+
+Install Gatekeeper in the gatekeeper-system namespace:
+
+```bash
+helm repo add douban https://douban.github.io/charts/
+helm install gatekeeper douban/gatekeeper \
+  --namespace gatekeeper-system \
+  --create-namespace
+```
+
+### Production Installation
+
+Install with high availability and monitoring:
+
+```bash
+helm install gatekeeper douban/gatekeeper \
+  --namespace gatekeeper-system \
+  --create-namespace \
+  --set replicas=3 \
+  --set podMonitor.enabled=true \
+  --set audit.replicas=1
+```
+
+## Configuration
+
+### Essential Parameters
+
+| Parameter | Description | Default |
+|-----------|-------------|--------|
+| `replicas` | Number of controller replicas | `3` |
+| `auditInterval` | Audit check interval (seconds) | `60` |
+| `constraintViolationsLimit` | Max violations per constraint | `20` |
+| `validatingWebhookFailurePolicy` | Webhook failure policy | `Ignore` |
+| `disableValidatingWebhook` | Disable validation | `false` |
+| `disableMutation` | Disable mutation | `false` |
+| `logLevel` | Logging level | `INFO` |
+
+### Controller Configuration
+
+Configure the controller manager:
+
+```yaml
+controllerManager:
+  replicas: 3
+  priorityClassName: system-cluster-critical
+  resources:
+    limits:
+      memory: 512Mi
+    requests:
+      cpu: 100m
+      memory: 512Mi
+  
+  # Exempt namespaces from policy enforcement
+  exemptNamespaces:
+    - kube-system
+    - gatekeeper-system
+  
+  affinity:
+    podAntiAffinity:
+      preferredDuringSchedulingIgnoredDuringExecution:
+        - weight: 100
+          podAffinityTerm:
+            labelSelector:
+              matchExpressions:
+                - key: gatekeeper.sh/operation
+                  operator: In
+                  values:
+                    - webhook
+            topologyKey: kubernetes.io/hostname
+```
+
+### Audit Configuration
+
+Configure audit scanning:
+
+```yaml
+audit:
+  replicas: 1
+  auditInterval: 60
+  auditChunkSize: 500
+  logDenies: true
+  constraintViolationsLimit: 20
+  resources:
+    limits:
+      memory: 512Mi
+    requests:
+      cpu: 100m
+      memory: 512Mi
+```
+
+### Webhook Configuration
+
+Configure validating webhook:
+
+```yaml
+validatingWebhookFailurePolicy: Fail  # or "Ignore"
+validatingWebhookTimeoutSeconds: 3
+enableDeleteOperations: false
+
+# Exempt specific namespaces
+validatingWebhookExemptNamespacesLabels:
+  admission.gatekeeper.sh/ignore: "true"
+
+# Target specific resources
+validatingWebhookObjectSelector:
+  matchExpressions:
+    - key: admission.gatekeeper.sh/ignore
+      operator: DoesNotExist
+```
+
+### Mutation Configuration
+
+Enable resource mutation:
+
+```yaml
+disableMutation: false
+mutatingWebhookFailurePolicy: Ignore
+mutatingWebhookTimeoutSeconds: 1
+mutationAnnotations: true
+logMutations: true
+```
+
+## Real-World Examples
+
+### Example 1: Require Resource Limits
+
+Create a constraint template and constraint to require CPU/memory limits:
+
+```yaml
+# Install Gatekeeper first
+helm install gatekeeper douban/gatekeeper \
+  --namespace gatekeeper-system \
+  --create-namespace
+
+# Wait for Gatekeeper to be ready
+kubectl wait --for=condition=ready pod \
+  -l gatekeeper.sh/operation=webhook \
+  -n gatekeeper-system \
+  --timeout=90s
+
+# Create ConstraintTemplate
+cat <<EOF | kubectl apply -f -
+apiVersion: templates.gatekeeper.sh/v1
+kind: ConstraintTemplate
+metadata:
+  name: k8srequiredresources
+spec:
+  crd:
+    spec:
+      names:
+        kind: K8sRequiredResources
+  targets:
+    - target: admission.k8s.gatekeeper.sh
+      rego: |
+        package k8srequiredresources
+        
+        violation[{"msg": msg}] {
+          container := input.review.object.spec.containers[_]
+          not container.resources.limits.cpu
+          msg := sprintf("Container %v must specify CPU limits", [container.name])
+        }
+        
+        violation[{"msg": msg}] {
+          container := input.review.object.spec.containers[_]
+          not container.resources.limits.memory
+          msg := sprintf("Container %v must specify memory limits", [container.name])
+        }
+EOF
+
+# Create Constraint
+cat <<EOF | kubectl apply -f -
+apiVersion: constraints.gatekeeper.sh/v1beta1
+kind: K8sRequiredResources
+metadata:
+  name: require-resources
+spec:
+  enforcementAction: deny
+  match:
+    kinds:
+      - apiGroups: ["", "apps"]
+        kinds: ["Pod", "Deployment", "StatefulSet"]
+    namespaces:
+      - default
+      - production
+EOF
+```
+
+### Example 2: Block Privileged Containers
+
+```yaml
+apiVersion: templates.gatekeeper.sh/v1
+kind: ConstraintTemplate
+metadata:
+  name: k8sblockprivileged
+spec:
+  crd:
+    spec:
+      names:
+        kind: K8sBlockPrivileged
+  targets:
+    - target: admission.k8s.gatekeeper.sh
+      rego: |
+        package k8sblockprivileged
+        
+        violation[{"msg": msg}] {
+          container := input.review.object.spec.containers[_]
+          container.securityContext.privileged
+          msg := sprintf("Privileged container not allowed: %v", [container.name])
+        }
+---
+apiVersion: constraints.gatekeeper.sh/v1beta1
+kind: K8sBlockPrivileged
+metadata:
+  name: block-privileged-containers
+spec:
+  enforcementAction: deny
+  match:
+    kinds:
+      - apiGroups: ["", "apps"]
+        kinds: ["Pod", "Deployment"]
+```
+
+### Example 3: Require Labels
+
+```yaml
+apiVersion: templates.gatekeeper.sh/v1
+kind: ConstraintTemplate
+metadata:
+  name: k8srequiredlabels
+spec:
+  crd:
+    spec:
+      names:
+        kind: K8sRequiredLabels
+      validation:
+        openAPIV3Schema:
+          type: object
+          properties:
+            labels:
+              type: array
+              items:
+                type: string
+  targets:
+    - target: admission.k8s.gatekeeper.sh
+      rego: |
+        package k8srequiredlabels
+        
+        violation[{"msg": msg, "details": {"missing_labels": missing}}] {
+          provided := {label | input.review.object.metadata.labels[label]}
+          required := {label | label := input.parameters.labels[_]}
+          missing := required - provided
+          count(missing) > 0
+          msg := sprintf("Missing required labels: %v", [missing])
+        }
+---
+apiVersion: constraints.gatekeeper.sh/v1beta1
+kind: K8sRequiredLabels
+metadata:
+  name: require-app-labels
+spec:
+  enforcementAction: deny
+  match:
+    kinds:
+      - apiGroups: ["apps"]
+        kinds: ["Deployment", "StatefulSet"]
+  parameters:
+    labels:
+      - app
+      - environment
+      - owner
+```
+
+### Example 4: Mutation - Add Labels
+
+```yaml
+apiVersion: mutations.gatekeeper.sh/v1alpha1
+kind: Assign
+metadata:
+  name: add-default-labels
+spec:
+  applyTo:
+    - groups: ["apps"]
+      kinds: ["Deployment"]
+      versions: ["v1"]
+  location: "metadata.labels.managed-by"
+  parameters:
+    assign:
+      value: "gatekeeper"
+```
+
+## Monitoring and Observability
+
+### Prometheus Integration
+
+Enable PodMonitor for metrics:
+
+```yaml
+podMonitor:
+  enabled: true
+  extraLabels:
+    prometheus: kube-prometheus
+```
+
+Key metrics:
+- `gatekeeper_violations` - Total constraint violations
+- `gatekeeper_audit_duration_seconds` - Audit cycle duration
+- `gatekeeper_validation_duration_seconds` - Validation latency
+- `gatekeeper_webhook_admission_requests_total` - Total admission requests
+
+### View Violations
+
+Check constraint status:
+
+```bash
+# List all constraints
+kubectl get constraints
+
+# Get detailed violation information
+kubectl get k8srequiredresources require-resources -o yaml
+
+# View all violations across constraints
+kubectl get constraints -A -o json | \
+  jq -r '.items[] | select(.status.totalViolations > 0) | 
+  "\(.metadata.name): \(.status.totalViolations) violations"'
+```
+
+## Troubleshooting
+
+### Webhook Not Working
+
+1. Check webhook configuration:
+```bash
+kubectl get validatingwebhookconfigurations gatekeeper-validating-webhook-configuration
+```
+
+2. Verify Gatekeeper pods:
+```bash
+kubectl get pods -n gatekeeper-system
+kubectl logs -n gatekeeper-system -l gatekeeper.sh/operation=webhook
+```
+
+3. Test webhook connectivity:
+```bash
+kubectl run test-webhook --image=nginx --dry-run=server
+```
+
+### Policy Not Enforcing
+
+1. Check constraint status:
+```bash
+kubectl describe constraint <constraint-name>
+```
+
+2. Verify enforcement action:
+```yaml
+spec:
+  enforcementAction: deny  # Must be "deny" not "dryrun" or "warn"
+```
+
+3. Check namespace exemptions:
+```bash
+kubectl get deploy gatekeeper-controller-manager -n gatekeeper-system -o yaml | \
+  grep exempt-namespace
+```
+
+### Audit Not Running
+
+1. Check audit pod:
+```bash
+kubectl get pods -n gatekeeper-system -l gatekeeper.sh/operation=audit
+kubectl logs -n gatekeeper-system -l gatekeeper.sh/operation=audit
+```
+
+2. Verify audit configuration:
+```bash
+helm get values gatekeeper -n gatekeeper-system | grep -A 10 audit
+```
+
+### Rego Policy Errors
+
+Test Rego policies locally:
+
+```bash
+# Install OPA CLI
+wget https://openpolicyagent.org/downloads/latest/opa_linux_amd64
+
+# Test policy
+opa test policy.rego test.rego
+
+# Evaluate policy
+opa eval --data policy.rego --input input.json 'data.package.violation'
+```
+
+## Advanced Configuration
+
+### External Data Sources
+
+Enable external data providers:
+
+```yaml
+enableExternalData: true
+externaldataProviderResponseCacheTTL: 3m
+```
+
+### Performance Tuning
+
+```yaml
+# Increase timeout for complex policies
+validatingWebhookTimeoutSeconds: 5
+
+# Adjust audit performance
+auditChunkSize: 1000
+auditFromCache: true
+
+# Limit concurrent webhook threads
+maxServingThreads: 10
+```
+
+### Network Policy
+
+Restrict Gatekeeper network access:
+
+```yaml
+controllerManager:
+  networkPolicy:
+    enabled: true
+    ingress:
+      - from:
+          - namespaceSelector:
+              matchLabels:
+                name: kube-system
+```
+
+## Exempting Resources
+
+### By Namespace
+
+```yaml
+controllerManager:
+  exemptNamespaces:
+    - kube-system
+    - gatekeeper-system
+    - monitoring
+```
+
+### By Label
+
+```yaml
+validatingWebhookExemptNamespacesLabels:
+  admission.gatekeeper.sh/ignore: "true"
+```
+
+### By Object Selector
+
+```yaml
+validatingWebhookObjectSelector:
+  matchExpressions:
+    - key: policy.gatekeeper.sh/exempt
+      operator: DoesNotExist
+```
+
+## Security Considerations
+
+<Warning>
+  Setting `validatingWebhookFailurePolicy: Ignore` allows resources to be created if Gatekeeper is unavailable. Use `Fail` for critical policies in production.
+</Warning>
+
+### High Availability
+
+```yaml
+replicas: 3
+
+pdb:
+  controllerManager:
+    minAvailable: 2
+
+controllerManager:
+  affinity:
+    podAntiAffinity:
+      requiredDuringSchedulingIgnoredDuringExecution:
+        - labelSelector:
+            matchExpressions:
+              - key: gatekeeper.sh/operation
+                operator: In
+                values:
+                  - webhook
+          topologyKey: kubernetes.io/hostname
+```
+
+## Uninstallation
+
+<Warning>
+  Before uninstalling, delete all constraints and constraint templates to prevent orphaned resources.
+</Warning>
+
+```bash
+# Delete all constraints
+kubectl delete constraints --all
+
+# Delete all constraint templates
+kubectl delete constrainttemplates --all
+
+# Uninstall Gatekeeper
+helm uninstall gatekeeper --namespace gatekeeper-system
+
+# Remove CRDs if needed
+kubectl delete crd -l gatekeeper.sh/system=yes
+```
+
+## Additional Resources
+
+- [Gatekeeper Documentation](https://open-policy-agent.github.io/gatekeeper/)
+- [OPA Rego Language](https://www.openpolicyagent.org/docs/latest/policy-language/)
+- [Policy Library](https://github.com/open-policy-agent/gatekeeper-library)
+- [Chart Source](https://github.com/open-policy-agent/gatekeeper/tree/master/charts/gatekeeper)

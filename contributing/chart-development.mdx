@@ -1,0 +1,495 @@
+---
+title: Chart Development
+description: Guide to creating and developing Helm charts for this repository
+---
+
+This guide walks you through creating a new Helm chart and developing it according to the repository's standards.
+
+## Creating a New Chart
+
+<Steps>
+  <Step title="Generate the chart scaffold">
+    Use Helm's built-in command to create a basic chart structure:
+    
+    ```bash
+    cd charts/
+    helm create my-new-chart
+    ```
+    
+    This creates a directory with the standard chart structure.
+  </Step>
+
+  <Step title="Review the generated structure">
+    The generated chart includes:
+    
+    ```
+    my-new-chart/
+    ├── Chart.yaml          # Chart metadata
+    ├── values.yaml         # Default configuration values
+    ├── templates/          # Kubernetes manifest templates
+    │   ├── deployment.yaml
+    │   ├── service.yaml
+    │   ├── ingress.yaml
+    │   ├── serviceaccount.yaml
+    │   ├── _helpers.tpl    # Template helper functions
+    │   ├── NOTES.txt       # Post-install notes
+    │   └── tests/          # Helm tests
+    └── .helmignore         # Files to ignore when packaging
+    ```
+  </Step>
+
+  <Step title="Customize Chart.yaml">
+    Update the chart metadata with accurate information:
+    
+    ```yaml
+    apiVersion: v2
+    name: my-new-chart
+    description: A Helm chart for deploying My Application
+    home: https://myapp.example.com
+    type: application
+    version: 0.1.0
+    appVersion: "1.0.0"
+    maintainers:
+      - name: douban
+    ```
+  </Step>
+
+  <Step title="Configure values.yaml">
+    Define sensible defaults for your chart (see [Common Parameters](/reference/common-parameters)).
+  </Step>
+
+  <Step title="Create templates">
+    Develop your Kubernetes manifest templates following best practices.
+  </Step>
+</Steps>
+
+## Chart Structure Deep Dive
+
+### Chart.yaml
+
+The `Chart.yaml` file contains metadata about your chart:
+
+```yaml
+apiVersion: v2              # Helm 3 uses apiVersion v2
+name: nginx                 # Chart name (must match directory name)
+description: A Helm chart for Kubernetes
+home: https://nginx.org/    # Project homepage
+type: application           # Type: 'application' or 'library'
+version: 0.4.1             # Chart version (SemVer)
+appVersion: "1.16.0"        # Version of the application
+maintainers:
+  - name: douban
+```
+
+**Important fields:**
+- `version`: Must be incremented with every chart change
+- `appVersion`: The version of the application being deployed
+- `type`: Use `application` for deployable charts, `library` for shared templates
+
+### values.yaml
+
+The `values.yaml` file defines configurable parameters with sensible defaults:
+
+```yaml
+replicaCount: 1
+
+image:
+  repository: nginx
+  pullPolicy: IfNotPresent
+  tag: ""  # Defaults to appVersion if empty
+
+service:
+  type: ClusterIP
+  port: 80
+
+resources: {}
+  # limits:
+  #   cpu: 100m
+  #   memory: 128Mi
+  # requests:
+  #   cpu: 100m
+  #   memory: 128Mi
+```
+
+<Tip>
+  Leave resource limits empty by default to allow charts to run in resource-constrained environments. Users should consciously set these based on their needs.
+</Tip>
+
+### templates/ Directory
+
+This directory contains Go template files that generate Kubernetes manifests.
+
+#### Common Templates
+
+Most charts in this repository include:
+
+- **deployment.yaml**: The main Deployment resource
+- **service.yaml**: Service to expose the application
+- **ingress.yaml**: Optional Ingress for external access
+- **serviceaccount.yaml**: ServiceAccount for the pods
+- **servicemonitor.yaml**: Optional ServiceMonitor for Prometheus
+- **prometheusrule.yaml**: Optional PrometheusRule for alerting
+- **httproute.yaml**: Optional HTTPRoute for Gateway API
+
+#### _helpers.tpl
+
+This file contains reusable template functions. Every chart includes these standard helpers:
+
+```yaml
+{{/*
+Expand the name of the chart.
+*/}}
+{{- define "nginx.name" -}}
+{{- default .Chart.Name .Values.nameOverride | trunc 63 | trimSuffix "-" }}
+{{- end }}
+
+{{/*
+Create a default fully qualified app name.
+*/}}
+{{- define "nginx.fullname" -}}
+{{- if .Values.fullnameOverride }}
+{{- .Values.fullnameOverride | trunc 63 | trimSuffix "-" }}
+{{- else }}
+{{- $name := default .Chart.Name .Values.nameOverride }}
+{{- if contains $name .Release.Name }}
+{{- .Release.Name | trunc 63 | trimSuffix "-" }}
+{{- else }}
+{{- printf "%s-%s" .Release.Name $name | trunc 63 | trimSuffix "-" }}
+{{- end }}
+{{- end }}
+{{- end }}
+
+{{/*
+Create chart name and version as used by the chart label.
+*/}}
+{{- define "nginx.chart" -}}
+{{- printf "%s-%s" .Chart.Name .Chart.Version | replace "+" "_" | trunc 63 | trimSuffix "-" }}
+{{- end }}
+
+{{/*
+Common labels
+*/}}
+{{- define "nginx.labels" -}}
+helm.sh/chart: {{ include "nginx.chart" . }}
+{{ include "nginx.selectorLabels" . }}
+{{- if .Chart.AppVersion }}
+app.kubernetes.io/version: {{ .Chart.AppVersion | quote }}
+{{- end }}
+app.kubernetes.io/managed-by: {{ .Release.Service }}
+{{- end }}
+
+{{/*
+Selector labels
+*/}}
+{{- define "nginx.selectorLabels" -}}
+app.kubernetes.io/name: {{ include "nginx.name" . }}
+app.kubernetes.io/instance: {{ .Release.Name }}
+{{- end }}
+
+{{/*
+Create the name of the service account to use
+*/}}
+{{- define "nginx.serviceAccountName" -}}
+{{- if .Values.serviceAccount.create }}
+{{- default (include "nginx.fullname" .) .Values.serviceAccount.name }}
+{{- else }}
+{{- default "default" .Values.serviceAccount.name }}
+{{- end }}
+{{- end }}
+```
+
+**Replace `nginx` with your chart name** in all template definitions.
+
+## Testing with chart-testing
+
+The repository uses [chart-testing (ct)](https://github.com/helm/chart-testing) for validation.
+
+### Setting Up chart-testing
+
+<Steps>
+  <Step title="Install dependencies">
+    ```bash
+    # Install Helm 3
+    curl https://raw.githubusercontent.com/helm/helm/master/scripts/get-helm-3 | bash
+    
+    # Install chart-testing
+    pip install yamllint yamale
+    # Or use the ct Docker image
+    ```
+  </Step>
+
+  <Step title="Add dependency repositories">
+    If your chart depends on external charts, add the repositories:
+    
+    ```bash
+    helm repo add stable https://charts.helm.sh/stable
+    helm repo add bitnami https://charts.bitnami.com/bitnami
+    helm repo update
+    ```
+  </Step>
+
+  <Step title="Run linting">
+    Test your chart against linting rules:
+    
+    ```bash
+    ct lint --chart-dirs charts --charts charts/my-new-chart
+    ```
+  </Step>
+</Steps>
+
+### What ct lint Checks
+
+The linting process validates:
+
+1. **Chart.yaml validation**
+   - Required fields are present
+   - Version follows semantic versioning
+   - Version was incremented (for changed charts)
+
+2. **values.yaml formatting**
+   - Valid YAML syntax
+   - Proper indentation
+   - No duplicate keys
+
+3. **Template validation**
+   - Templates can be rendered
+   - Generated manifests are valid Kubernetes resources
+   - No deprecated API versions
+
+4. **Maintainer guidelines**
+   - README exists and is not empty
+   - NOTES.txt provides helpful information
+
+### Configuration (ct.yaml)
+
+The repository's `ct.yaml` configures chart-testing:
+
+```yaml
+remote: origin
+chart-dirs:
+  - charts                    # Directory containing charts
+chart-repos:                  # External chart repositories
+  - stable=https://charts.helm.sh/stable/
+  - douban=https://douban.github.io/charts/
+  - bitnami=https://raw.githubusercontent.com/bitnami/charts/archive-full-index/bitnami
+  - timescale=https://charts.timescale.com/
+helm-extra-args: --timeout 600s  # Extra args for helm commands
+```
+
+## Linting Requirements
+
+Beyond chart-testing, follow these best practices:
+
+### YAML Formatting
+
+- Use 2-space indentation
+- Use `# comments` for documentation
+- Quote strings when necessary
+- Keep lines under 120 characters when possible
+
+### Template Best Practices
+
+1. **Always set resource names using helpers**
+   ```yaml
+   metadata:
+     name: {{ include "nginx.fullname" . }}
+     labels:
+       {{- include "nginx.labels" . | nindent 4 }}
+   ```
+
+2. **Use conditional rendering**
+   ```yaml
+   {{- if .Values.ingress.enabled }}
+   apiVersion: networking.k8s.io/v1
+   kind: Ingress
+   # ...
+   {{- end }}
+   ```
+
+3. **Quote string values**
+   ```yaml
+   image: "{{ .Values.image.repository }}:{{ .Values.image.tag | default .Chart.AppVersion }}"
+   ```
+
+4. **Use `.Values` for all configurable parameters**
+   ```yaml
+   replicas: {{ .Values.replicaCount }}
+   ```
+
+5. **Provide sensible defaults**
+   ```yaml
+   image:
+     tag: "{{ .Values.image.tag | default .Chart.AppVersion }}"
+   ```
+
+### Documentation Requirements
+
+- **README.md**: Describe what the chart does, how to install it, and document all parameters
+- **NOTES.txt**: Provide post-installation instructions
+- **values.yaml comments**: Comment all configurable values
+
+## Release Process
+
+When your chart is ready and merged to `master`, it's automatically released.
+
+### Automated Release Workflow
+
+The `release.yaml` workflow handles releases:
+
+```yaml
+name: Release Charts
+
+on:
+  push:
+    branches:
+      - master
+
+jobs:
+  release:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v2
+
+      - name: Fetch history
+        run: git fetch --prune --unshallow
+
+      - name: Configure Git
+        run: |
+          git config user.name "$GITHUB_ACTOR"
+          git config user.email "$GITHUB_ACTOR@users.noreply.github.com"
+
+      - name: Install Helm
+        run: |
+          curl -fsSLo get_helm.sh https://raw.githubusercontent.com/helm/helm/master/scripts/get-helm-3
+          chmod 700 get_helm.sh
+          ./get_helm.sh
+
+      - name: Add dependency chart repos
+        run: |
+          helm repo add stable https://charts.helm.sh/stable
+          helm repo add douban https://douban.github.io/charts/
+          helm repo add bitnami https://charts.bitnami.com/bitnami
+
+      - name: Run chart-releaser
+        uses: helm/chart-releaser-action@v1.0.0-rc.2
+        env:
+          CR_TOKEN: "${{ secrets.GITHUB_TOKEN }}"
+```
+
+### What Happens During Release
+
+<Steps>
+  <Step title="Detect changed charts">
+    chart-releaser detects which charts have changed since the last release.
+  </Step>
+
+  <Step title="Package charts">
+    Changed charts are packaged into `.tgz` files.
+  </Step>
+
+  <Step title="Create GitHub Release">
+    A GitHub Release is created for each chart with the version from Chart.yaml.
+  </Step>
+
+  <Step title="Upload packages">
+    Chart packages are uploaded as release assets.
+  </Step>
+
+  <Step title="Update index">
+    The `index.yaml` file is updated in the `gh-pages` branch.
+  </Step>
+</Steps>
+
+### After Release
+
+Once released, users can install your chart:
+
+```bash
+helm repo add douban https://douban.github.io/charts
+helm repo update
+helm install my-release douban/my-new-chart
+```
+
+## Common Patterns
+
+### Environment Variables
+
+Support custom environment variables:
+
+```yaml
+# values.yaml
+env: []
+
+# deployment.yaml
+{{- with .Values.env }}
+env:
+  {{- toYaml . | nindent 12 }}
+{{- end}}
+```
+
+### Volumes and Volume Mounts
+
+```yaml
+# values.yaml
+volumes: []
+volumeMounts: []
+
+# deployment.yaml
+{{- with .Values.volumeMounts }}
+volumeMounts:
+  {{- toYaml . | nindent 12 }}
+{{- end }}
+
+{{- with .Values.volumes}}
+volumes:
+  {{- toYaml . | nindent 8 }}
+{{- end }}
+```
+
+### ServiceMonitor for Prometheus
+
+```yaml
+# values.yaml
+serviceMonitor:
+  enabled: false
+
+# templates/servicemonitor.yaml
+{{- if .Values.serviceMonitor.enabled }}
+apiVersion: monitoring.coreos.com/v1
+kind: ServiceMonitor
+metadata:
+  name: {{ include "nginx.fullname" . }}
+  labels:
+    {{- include "nginx.labels" . | nindent 4 }}
+spec:
+  selector:
+    matchLabels:
+      {{- include "nginx.selectorLabels" . | nindent 6 }}
+  endpoints:
+    - port: http
+{{- end }}
+```
+
+## Testing Your Chart
+
+Before submitting:
+
+```bash
+# Lint the chart
+ct lint --chart-dirs charts --charts charts/my-new-chart
+
+# Install and test
+helm install test-release charts/my-new-chart
+helm test test-release
+helm uninstall test-release
+
+# Test with custom values
+helm install test-release charts/my-new-chart -f my-values.yaml
+```
+
+## Next Steps
+
+- Review [Common Parameters](/reference/common-parameters) for standard configuration patterns
+- Check [Chart Reference](/reference/overview) for best practices
+- See [Contributing Guidelines](/contributing/guidelines) for the pull request process

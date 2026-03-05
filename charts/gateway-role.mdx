@@ -1,0 +1,564 @@
+---
+title: Gateway Role
+description: RBAC roles for Kubernetes Gateway API access control
+---
+
+Gateway Role provides predefined RBAC ClusterRoles for managing access to Kubernetes Gateway API resources. It enables role-based access control for application developers and cluster administrators.
+
+## Overview
+
+This chart creates ClusterRoles for:
+
+- **App Developer View-Only**: Read-only access to Gateway API resources
+- **App Developer Editor**: Create and manage HTTPRoutes and BackendPolicies
+- **Cluster Admin**: Full access to all Gateway API resources including Gateways and GatewayClasses
+
+## Prerequisites
+
+- Kubernetes cluster v1.23+
+- Gateway API CRDs installed (from Envoy Gateway, Istio, or standalone)
+- Cluster-admin permissions to create ClusterRoles
+- Helm 3.x
+
+<Warning>
+  This chart only creates ClusterRoles, not ClusterRoleBindings. You must bind these roles to users or service accounts separately.
+</Warning>
+
+## Installation
+
+### Basic Installation
+
+Install without enabling any roles (dry-run):
+
+```bash
+helm repo add douban https://douban.github.io/charts/
+helm install gateway-roles douban/gateway-role \
+  --namespace kube-system
+```
+
+### Enable Specific Roles
+
+Install with app developer view-only role:
+
+```bash
+helm install gateway-roles douban/gateway-role \
+  --namespace kube-system \
+  --set appDeveloper.enabled=true \
+  --set appDeveloper.viewOnly.enabled=true
+```
+
+Install with app developer editor role:
+
+```bash
+helm install gateway-roles douban/gateway-role \
+  --namespace kube-system \
+  --set appDeveloper.enabled=true \
+  --set appDeveloper.edit.enabled=true
+```
+
+Install with cluster admin role:
+
+```bash
+helm install gateway-roles douban/gateway-role \
+  --namespace kube-system \
+  --set clusterAdmin.enabled=true
+```
+
+### Enable All Roles
+
+```bash
+helm install gateway-roles douban/gateway-role \
+  --namespace kube-system \
+  --set appDeveloper.enabled=true \
+  --set appDeveloper.viewOnly.enabled=true \
+  --set appDeveloper.edit.enabled=true \
+  --set clusterAdmin.enabled=true
+```
+
+## Configuration
+
+### Essential Parameters
+
+| Parameter | Description | Default |
+|-----------|-------------|--------|
+| `appDeveloper.enabled` | Enable app developer roles | `false` |
+| `appDeveloper.viewOnly.enabled` | Create view-only role | `false` |
+| `appDeveloper.edit.enabled` | Create editor role | `false` |
+| `clusterAdmin.enabled` | Create cluster admin role | `false` |
+
+### App Developer View-Only Role
+
+```yaml
+appDeveloper:
+  enabled: true
+  viewOnly:
+    enabled: true
+    labels:
+      gateway.networking.io/role-instance: app-developer-view-only-role
+```
+
+**Permissions:**
+- Read access to HTTPRoutes, TLSRoutes
+- Read access to GatewayClasses, Gateways, ReferenceGrants
+- Read access to Envoy Gateway extension resources
+
+### App Developer Editor Role
+
+```yaml
+appDeveloper:
+  enabled: true
+  edit:
+    enabled: true
+    labels:
+      gateway.networking.io/role-instance: app-developer-editor-role
+```
+
+**Permissions:**
+- Full CRUD access to HTTPRoutes, TLSRoutes
+- Full CRUD access to BackendTrafficPolicy, HTTPRouteFilter, ClientTrafficPolicy
+- Read-only access to Gateways and GatewayClasses
+
+### Cluster Admin Role
+
+```yaml
+clusterAdmin:
+  enabled: true
+  labels:
+    gateway.networking.io/role-instance: cluster-admin-role
+```
+
+**Permissions:**
+- Full access to all Gateway API core resources
+- Full access to all Envoy Gateway extension resources
+
+## Real-World Examples
+
+### Example 1: Grant View Access to Development Team
+
+```bash
+# Install role
+helm install gateway-roles douban/gateway-role \
+  --namespace kube-system \
+  --set appDeveloper.enabled=true \
+  --set appDeveloper.viewOnly.enabled=true
+
+# Create ClusterRoleBinding for dev team
+kubectl create clusterrolebinding dev-team-gateway-viewer \
+  --clusterrole=gateway-role-app-developer-view-only \
+  --group=dev-team
+
+# Verify access
+kubectl auth can-i get httproutes --as=user@example.com --as-group=dev-team
+# Output: yes
+
+kubectl auth can-i create httproutes --as=user@example.com --as-group=dev-team
+# Output: no
+```
+
+### Example 2: Grant Edit Access to App Developers
+
+```bash
+# Install role
+helm install gateway-roles douban/gateway-role \
+  --namespace kube-system \
+  --set appDeveloper.enabled=true \
+  --set appDeveloper.edit.enabled=true
+
+# Bind to specific namespace for app-team
+kubectl create rolebinding app-team-gateway-editor \
+  --clusterrole=gateway-role-app-developer-edit \
+  --group=app-team \
+  --namespace=production
+
+# Create service account for automation
+kubectl create serviceaccount gateway-deployer -n production
+
+# Bind role to service account
+kubectl create rolebinding gateway-deployer-binding \
+  --clusterrole=gateway-role-app-developer-edit \
+  --serviceaccount=production:gateway-deployer \
+  --namespace=production
+```
+
+### Example 3: Grant Full Gateway Admin Access
+
+```bash
+# Install role
+helm install gateway-roles douban/gateway-role \
+  --namespace kube-system \
+  --set clusterAdmin.enabled=true
+
+# Bind to platform team
+kubectl create clusterrolebinding platform-team-gateway-admin \
+  --clusterrole=gateway-role-cluster-admin \
+  --group=platform-team
+
+# Verify full access
+kubectl auth can-i '*' gateways --as=admin@example.com --as-group=platform-team
+# Output: yes
+```
+
+### Example 4: Multi-Tenant Gateway Setup
+
+```yaml
+# Install all roles
+helm install gateway-roles douban/gateway-role \
+  --namespace kube-system \
+  --set appDeveloper.enabled=true \
+  --set appDeveloper.viewOnly.enabled=true \
+  --set appDeveloper.edit.enabled=true \
+  --set clusterAdmin.enabled=true
+
+# Create bindings for different teams
+---
+# Platform team - full admin
+apiVersion: rbac.authorization.k8s.io/v1
+kind: ClusterRoleBinding
+metadata:
+  name: platform-team-gateway-admin
+roleRef:
+  apiGroup: rbac.authorization.k8s.io
+  kind: ClusterRole
+  name: gateway-role-cluster-admin
+subjects:
+  - kind: Group
+    name: platform-team
+    apiGroup: rbac.authorization.k8s.io
+---
+# App team A - edit in their namespace
+apiVersion: rbac.authorization.k8s.io/v1
+kind: RoleBinding
+metadata:
+  name: team-a-gateway-editor
+  namespace: team-a
+roleRef:
+  apiGroup: rbac.authorization.k8s.io
+  kind: ClusterRole
+  name: gateway-role-app-developer-edit
+subjects:
+  - kind: Group
+    name: team-a
+    apiGroup: rbac.authorization.k8s.io
+---
+# App team B - edit in their namespace
+apiVersion: rbac.authorization.k8s.io/v1
+kind: RoleBinding
+metadata:
+  name: team-b-gateway-editor
+  namespace: team-b
+roleRef:
+  apiGroup: rbac.authorization.k8s.io
+  kind: ClusterRole
+  name: gateway-role-app-developer-edit
+subjects:
+  - kind: Group
+    name: team-b
+    apiGroup: rbac.authorization.k8s.io
+---
+# Security team - view only across all namespaces
+apiVersion: rbac.authorization.k8s.io/v1
+kind: ClusterRoleBinding
+metadata:
+  name: security-team-gateway-viewer
+roleRef:
+  apiGroup: rbac.authorization.k8s.io
+  kind: ClusterRole
+  name: gateway-role-app-developer-view-only
+subjects:
+  - kind: Group
+    name: security-team
+    apiGroup: rbac.authorization.k8s.io
+```
+
+## Resource Permissions
+
+### View-Only Role Resources
+
+**Gateway API Core:**
+- `httproutes` (get, list, watch)
+- `tlsroutes` (get, list, watch)
+- `gatewayclasses` (get, list, watch)
+- `gateways` (get, list, watch)
+- `referencegrants` (get, list, watch)
+
+**Envoy Gateway Extensions:**
+- All resources in `gateway.envoyproxy.io` (get, list, watch)
+
+### Editor Role Resources
+
+**Gateway API Core:**
+- `httproutes` (get, list, watch, create, update, patch, delete)
+- `tlsroutes` (get, list, watch, create, update, patch, delete)
+
+**Envoy Gateway Extensions:**
+- `Backend` (full CRUD)
+- `BackendTrafficPolicy` (full CRUD)
+- `HTTPRouteFilter` (full CRUD)
+- `ClientTrafficPolicy` (full CRUD)
+
+### Admin Role Resources
+
+Full access (`*`) to all resources in:
+- `gateway.networking.k8s.io`
+- `gateway.envoyproxy.io`
+
+## Usage Scenarios
+
+### Scenario 1: GitOps with CI/CD
+
+```yaml
+# Create service account for ArgoCD
+apiVersion: v1
+kind: ServiceAccount
+metadata:
+  name: argocd-gateway-deployer
+  namespace: argocd
+---
+apiVersion: rbac.authorization.k8s.io/v1
+kind: ClusterRoleBinding
+metadata:
+  name: argocd-gateway-deployer
+roleRef:
+  apiGroup: rbac.authorization.k8s.io
+  kind: ClusterRole
+  name: gateway-role-app-developer-edit
+subjects:
+  - kind: ServiceAccount
+    name: argocd-gateway-deployer
+    namespace: argocd
+```
+
+### Scenario 2: Developer Self-Service
+
+```bash
+# Developers can create HTTPRoutes in their namespace
+kubectl apply -f - <<EOF
+apiVersion: gateway.networking.k8s.io/v1
+kind: HTTPRoute
+metadata:
+  name: my-app-route
+  namespace: my-team
+spec:
+  parentRefs:
+    - name: shared-gateway
+      namespace: gateway-system
+  rules:
+    - matches:
+        - path:
+            type: PathPrefix
+            value: /my-app
+      backendRefs:
+        - name: my-app-service
+          port: 80
+EOF
+```
+
+### Scenario 3: Read-Only Monitoring Access
+
+```yaml
+# Grant monitoring tools read access
+apiVersion: rbac.authorization.k8s.io/v1
+kind: ClusterRoleBinding
+metadata:
+  name: monitoring-gateway-viewer
+roleRef:
+  apiGroup: rbac.authorization.k8s.io
+  kind: ClusterRole
+  name: gateway-role-app-developer-view-only
+subjects:
+  - kind: ServiceAccount
+    name: prometheus
+    namespace: monitoring
+```
+
+## Verification
+
+### Check Created Roles
+
+```bash
+# List all gateway-related ClusterRoles
+kubectl get clusterroles | grep gateway-role
+
+# Describe a specific role
+kubectl describe clusterrole gateway-role-app-developer-edit
+
+# Get role YAML
+kubectl get clusterrole gateway-role-cluster-admin -o yaml
+```
+
+### Test Permissions
+
+```bash
+# Test as specific user
+kubectl auth can-i create httproutes \
+  --as=developer@example.com \
+  --as-group=dev-team \
+  -n production
+
+# Test as service account
+kubectl auth can-i get gateways \
+  --as=system:serviceaccount:production:gateway-deployer
+
+# Test all permissions for a user
+kubectl auth can-i --list \
+  --as=developer@example.com \
+  --as-group=dev-team
+```
+
+## Troubleshooting
+
+### Role Not Created
+
+Check if role enablement flags are set:
+```bash
+helm get values gateway-roles -n kube-system
+```
+
+Verify ClusterRoles exist:
+```bash
+kubectl get clusterroles -l app.kubernetes.io/name=gateway-role
+```
+
+### Permission Denied
+
+1. Verify role binding exists:
+```bash
+kubectl get clusterrolebinding | grep gateway
+kubectl get rolebinding -A | grep gateway
+```
+
+2. Check binding details:
+```bash
+kubectl describe clusterrolebinding <binding-name>
+```
+
+3. Test specific permission:
+```bash
+kubectl auth can-i <verb> <resource> --as=<user> --as-group=<group>
+```
+
+### Gateway API Resources Not Found
+
+Install Gateway API CRDs:
+```bash
+# Install Gateway API CRDs
+kubectl apply -f https://github.com/kubernetes-sigs/gateway-api/releases/download/v1.0.0/standard-install.yaml
+
+# Or install Envoy Gateway (includes CRDs)
+helm install eg oci://docker.io/envoyproxy/gateway-helm \
+  --namespace envoy-gateway-system \
+  --create-namespace
+```
+
+## Best Practices
+
+### 1. Use Namespace-Scoped Bindings
+
+```bash
+# Prefer RoleBinding over ClusterRoleBinding when possible
+kubectl create rolebinding team-a-gateway \
+  --clusterrole=gateway-role-app-developer-edit \
+  --group=team-a \
+  --namespace=team-a-apps
+```
+
+### 2. Principle of Least Privilege
+
+- Start with view-only access
+- Grant edit access only to specific namespaces
+- Reserve cluster-admin role for platform teams
+
+### 3. Use Groups for User Management
+
+```yaml
+# Bind to groups, not individual users
+subjects:
+  - kind: Group
+    name: developers
+    apiGroup: rbac.authorization.k8s.io
+```
+
+### 4. Service Account Automation
+
+```yaml
+# Use service accounts for CI/CD pipelines
+subjects:
+  - kind: ServiceAccount
+    name: github-actions
+    namespace: ci-cd
+```
+
+## Security Considerations
+
+<Warning>
+  The editor role allows creating HTTPRoutes that can route traffic to any service. Consider additional NetworkPolicies to restrict backend access.
+</Warning>
+
+### Limit ReferenceGrants
+
+Create ReferenceGrants to control cross-namespace access:
+
+```yaml
+apiVersion: gateway.networking.k8s.io/v1beta1
+kind: ReferenceGrant
+metadata:
+  name: allow-team-a-to-shared-gateway
+  namespace: gateway-system
+spec:
+  from:
+    - group: gateway.networking.k8s.io
+      kind: HTTPRoute
+      namespace: team-a
+  to:
+    - group: gateway.networking.k8s.io
+      kind: Gateway
+      name: shared-gateway
+```
+
+### Audit Access
+
+Enable audit logging for Gateway API resources:
+
+```yaml
+apiVersion: audit.k8s.io/v1
+kind: Policy
+rules:
+  - level: RequestResponse
+    resources:
+      - group: gateway.networking.k8s.io
+      - group: gateway.envoyproxy.io
+```
+
+## Integration with Gateway Controllers
+
+This chart works with any Gateway API implementation:
+
+- **Envoy Gateway**
+- **Istio Gateway**
+- **Kong Gateway**
+- **Traefik**
+- **NGINX Gateway Fabric**
+
+The roles are controller-agnostic and follow the standard Gateway API RBAC model.
+
+## Uninstallation
+
+```bash
+# Uninstall the chart
+helm uninstall gateway-roles --namespace kube-system
+
+# ClusterRoles will be deleted automatically
+# But ClusterRoleBindings must be deleted manually
+kubectl delete clusterrolebinding -l app.kubernetes.io/name=gateway-role
+```
+
+<Warning>
+  Deleting roles does not remove bindings. Clean up ClusterRoleBindings and RoleBindings separately to prevent orphaned bindings.
+</Warning>
+
+## Additional Resources
+
+- [Gateway API RBAC Documentation](https://gateway-api.sigs.k8s.io/guides/multiple-ns/)
+- [Kubernetes RBAC](https://kubernetes.io/docs/reference/access-authn-authz/rbac/)
+- [Envoy Gateway Security](https://gateway.envoyproxy.io/latest/user/security/)
+- [Gateway API Specification](https://gateway-api.sigs.k8s.io/)

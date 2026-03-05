@@ -1,0 +1,314 @@
+---
+title: Healthchecks
+description: Cron job and scheduled task monitoring platform
+---
+
+Healthchecks is a watchdog for your cron jobs and scheduled tasks that sends alerts when jobs fail to run on schedule.
+
+## Overview
+
+Healthchecks provides a simple way to monitor cron jobs, background workers, and scheduled tasks. It listens for HTTP requests ("pings") from your jobs and sends alerts when pings don't arrive on time.
+
+**Upstream project**: [https://github.com/healthchecks/healthchecks](https://github.com/healthchecks/healthchecks)
+
+## Installation
+
+```bash
+helm repo add douban https://douban.github.io/charts/
+helm repo update
+helm install healthchecks douban/healthchecks
+```
+
+## Dependencies
+
+- **PostgreSQL** - Application database (embedded by default via Bitnami chart)
+
+## Configuration
+
+### Basic Configuration
+
+```yaml
+image:
+  repository: healthchecks/healthchecks
+  tag: "latest"
+  pullPolicy: IfNotPresent
+
+service:
+  type: ClusterIP
+  port: 8000
+```
+
+### Site Configuration
+
+```yaml
+# Site root URL (displayed in UI and notifications)
+siterootOverride: "https://healthchecks.example.com"
+
+# Site name (displayed in UI)
+sitenameOverride: "My Healthchecks"
+```
+
+### PostgreSQL Configuration
+
+#### Using Embedded PostgreSQL (Default)
+
+```yaml
+postgresql:
+  enabled: true
+  persistence:
+    enabled: true
+    size: 10Gi
+  postgresqlDatabase: healthchecks
+  postgresqlUsername: healthchecks
+  postgresqlPassword: healthchecks
+```
+
+#### Using External PostgreSQL
+
+```yaml
+postgresql:
+  enabled: false
+
+extraEnvs:
+  - name: DB_HOST
+    value: "postgres.example.com"
+  - name: DB_PORT
+    value: "5432"
+  - name: DB_NAME
+    value: "healthchecks"
+  - name: DB_USER
+    value: "healthchecks"
+  - name: DB_PASSWORD
+    valueFrom:
+      secretKeyRef:
+        name: healthchecks-db
+        key: password
+```
+
+### Email Configuration
+
+```yaml
+extraConfigs:
+  EMAIL_HOST: "smtp.gmail.com"
+  EMAIL_PORT: "587"
+  EMAIL_USE_TLS: "True"
+  EMAIL_HOST_USER: "notifications@example.com"
+  DEFAULT_FROM_EMAIL: "healthchecks@example.com"
+
+extraEnvs:
+  - name: EMAIL_HOST_PASSWORD
+    valueFrom:
+      secretKeyRef:
+        name: healthchecks-email
+        key: password
+```
+
+### Using Existing Secret
+
+Store sensitive values in a pre-created secret:
+
+```yaml
+existingSecret: "healthchecks-secret"
+
+# The secret should contain:
+# - DB_PASSWORD
+# - EMAIL_HOST_PASSWORD
+# - SUPERUSER_EMAIL
+# - SUPERUSER_PASSWORD
+```
+
+### Additional Configuration
+
+Pass additional environment variables:
+
+```yaml
+extraConfigs:
+  # Telegram bot integration
+  TELEGRAM_BOT_NAME: "MyHealthchecksBot"
+  
+  # Discord integration
+  DISCORD_CLIENT_ID: "your-client-id"
+  
+  # Slack integration
+  SLACK_CLIENT_ID: "your-client-id"
+  
+  # Site customization
+  SITE_LOGO_URL: "https://example.com/logo.png"
+  REGISTRATION_OPEN: "True"
+
+extraEnvs:
+  - name: TELEGRAM_TOKEN
+    valueFrom:
+      secretKeyRef:
+        name: healthchecks-integrations
+        key: telegram-token
+```
+
+## Access Configuration
+
+### Ingress
+
+```yaml
+ingress:
+  enabled: true
+  className: nginx
+  annotations:
+    cert-manager.io/cluster-issuer: "letsencrypt"
+  paths:
+    - /
+  hosts:
+    - host: healthchecks.example.com
+      paths: []
+  tls:
+    - secretName: healthchecks-tls
+      hosts:
+        - healthchecks.example.com
+```
+
+### Probes
+
+```yaml
+probs:
+  livenessProbe:
+    httpGet:
+      path: /
+      port: http
+    initialDelaySeconds: 50
+  readinessProbe:
+    httpGet:
+      path: /
+      port: http
+    initialDelaySeconds: 50
+```
+
+## Example Values
+
+### Minimal Setup
+
+```yaml
+image:
+  repository: healthchecks/healthchecks
+  tag: "latest"
+
+siterootOverride: "https://checks.example.com"
+sitenameOverride: "Health Monitoring"
+
+postgresql:
+  enabled: true
+  persistence:
+    enabled: true
+    size: 10Gi
+
+ingress:
+  enabled: true
+  className: nginx
+  hosts:
+    - host: checks.example.com
+      paths: []
+```
+
+### Production Setup with External Services
+
+```yaml
+image:
+  repository: healthchecks/healthchecks
+  tag: "v2.10"
+  pullPolicy: IfNotPresent
+
+siterootOverride: "https://healthchecks.example.com"
+sitenameOverride: "Production Healthchecks"
+
+existingSecret: "healthchecks-secrets"
+
+postgresql:
+  enabled: false
+
+extraEnvs:
+  - name: DB_HOST
+    value: "postgres-prod.example.com"
+  - name: DB_PORT
+    value: "5432"
+  - name: DB_NAME
+    value: "healthchecks"
+  - name: DB_USER
+    value: "healthchecks"
+  - name: DB_PASSWORD
+    valueFrom:
+      secretKeyRef:
+        name: healthchecks-secrets
+        key: DB_PASSWORD
+  - name: EMAIL_HOST_PASSWORD
+    valueFrom:
+      secretKeyRef:
+        name: healthchecks-secrets
+        key: EMAIL_HOST_PASSWORD
+
+extraConfigs:
+  EMAIL_HOST: "smtp.sendgrid.net"
+  EMAIL_PORT: "587"
+  EMAIL_USE_TLS: "True"
+  EMAIL_HOST_USER: "apikey"
+  DEFAULT_FROM_EMAIL: "healthchecks@example.com"
+  REGISTRATION_OPEN: "False"
+  TELEGRAM_BOT_NAME: "ProductionHealthBot"
+
+ingress:
+  enabled: true
+  className: nginx
+  annotations:
+    cert-manager.io/cluster-issuer: "letsencrypt-prod"
+    nginx.ingress.kubernetes.io/rate-limit: "100"
+  hosts:
+    - host: healthchecks.example.com
+      paths: []
+  tls:
+    - secretName: healthchecks-tls
+      hosts:
+        - healthchecks.example.com
+
+resources:
+  limits:
+    cpu: 500m
+    memory: 512Mi
+  requests:
+    cpu: 100m
+    memory: 256Mi
+
+autoscaling:
+  enabled: true
+  minReplicas: 2
+  maxReplicas: 5
+  targetCPUUtilizationPercentage: 80
+```
+
+## Key Parameters
+
+| Parameter | Description | Default |
+|-----------|-------------|----------|
+| `image.repository` | Healthchecks image | `healthchecks/healthchecks` |
+| `image.tag` | Image tag | `latest` |
+| `service.port` | Service port | `8000` |
+| `siterootOverride` | Site root URL | `""` |
+| `sitenameOverride` | Site name | `""` |
+| `postgresql.enabled` | Use embedded PostgreSQL | `true` |
+| `existingSecret` | Name of existing secret | `""` |
+
+## Environment Variables
+
+Healthchecks supports many configuration options via environment variables. See the [upstream documentation](https://github.com/healthchecks/healthchecks) for a complete list.
+
+Common variables:
+
+- `SITE_ROOT` - The site's root URL
+- `SITE_NAME` - The site's name  
+- `REGISTRATION_OPEN` - Allow new user registration
+- `EMAIL_*` - Email configuration
+- `TELEGRAM_TOKEN` - Telegram bot token
+- `SLACK_CLIENT_ID` - Slack integration
+- `DISCORD_CLIENT_ID` - Discord integration
+
+## Requirements
+
+- Kubernetes 1.16+
+- Helm 3+
+- PersistentVolume provisioner (if using embedded PostgreSQL)

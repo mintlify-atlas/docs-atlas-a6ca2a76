@@ -1,0 +1,478 @@
+---
+title: CoreDNS
+description: Deploy and configure CoreDNS for Kubernetes DNS services
+---
+
+CoreDNS is a flexible, extensible DNS server that serves as the DNS service for Kubernetes clusters. It chains plugins to provide DNS resolution, service discovery, and custom DNS entries.
+
+## Overview
+
+CoreDNS replaces kube-dns as the default DNS solution in modern Kubernetes clusters. It provides:
+
+- **Service Discovery**: Automatic DNS resolution for Kubernetes services
+- **Pod DNS**: DNS records for pods based on their IP addresses
+- **Custom DNS**: Support for custom DNS entries and zone files
+- **Plugin Architecture**: Extensible through a plugin system
+- **High Availability**: Supports autoscaling and clustering
+
+## Prerequisites
+
+- Kubernetes cluster v1.14+
+- Cluster-admin permissions for RBAC resources
+- Helm 3.x
+
+<Warning>
+  CoreDNS is a critical cluster component. Misconfiguration can break DNS resolution for all pods and services. Always test changes in a non-production environment first.
+</Warning>
+
+## Installation
+
+### Basic Installation
+
+Install CoreDNS with default configuration:
+
+```bash
+helm repo add douban https://douban.github.io/charts/
+helm install coredns douban/coredns \
+  --namespace kube-system
+```
+
+### Custom Installation
+
+Install with custom replicas and resources:
+
+```bash
+helm install coredns douban/coredns \
+  --namespace kube-system \
+  --set replicaCount=3 \
+  --set resources.limits.memory=256Mi \
+  --set resources.requests.cpu=200m
+```
+
+## Configuration
+
+### Essential Parameters
+
+| Parameter | Description | Default |
+|-----------|-------------|--------|
+| `replicaCount` | Number of CoreDNS replicas | `1` |
+| `image.repository` | CoreDNS image repository | `coredns/coredns` |
+| `image.tag` | CoreDNS version | `""` (uses appVersion) |
+| `isClusterService` | Deploy as cluster-service | `true` |
+| `serviceType` | Kubernetes service type | `ClusterIP` |
+
+### DNS Server Configuration
+
+Configure DNS plugins through the `servers` section:
+
+```yaml
+servers:
+  - zones:
+      - zone: .
+    port: 53
+    plugins:
+      - name: errors
+      - name: health
+        configBlock: |
+          lameduck 10s
+      - name: ready
+      - name: kubernetes
+        parameters: cluster.local in-addr.arpa ip6.arpa
+        configBlock: |
+          pods insecure
+          fallthrough in-addr.arpa ip6.arpa
+          ttl 30
+      - name: prometheus
+        parameters: 0.0.0.0:9153
+      - name: forward
+        parameters: . /etc/resolv.conf
+      - name: cache
+        parameters: 30
+      - name: loop
+      - name: reload
+      - name: loadbalance
+```
+
+### Resource Management
+
+Set appropriate resource limits:
+
+```yaml
+resources:
+  limits:
+    cpu: 200m
+    memory: 256Mi
+  requests:
+    cpu: 100m
+    memory: 128Mi
+```
+
+### Autoscaling Options
+
+#### Horizontal Pod Autoscaler
+
+Enable HPA based on metrics:
+
+```yaml
+hpa:
+  enabled: true
+  minReplicas: 2
+  maxReplicas: 10
+  metrics:
+    - type: Resource
+      resource:
+        name: cpu
+        target:
+          type: Utilization
+          averageUtilization: 60
+```
+
+#### Cluster Proportional Autoscaler
+
+Scale based on cluster size:
+
+```yaml
+autoscaler:
+  enabled: true
+  coresPerReplica: 256
+  nodesPerReplica: 16
+  min: 2
+  max: 10
+  preventSinglePointFailure: true
+```
+
+### RBAC Configuration
+
+Enable RBAC resources (recommended):
+
+```yaml
+rbac:
+  create: true
+
+serviceAccount:
+  create: true
+  name: coredns
+```
+
+## Real-World Examples
+
+### Example 1: Production High-Availability Setup
+
+```yaml
+replicaCount: 3
+
+resources:
+  limits:
+    cpu: 200m
+    memory: 256Mi
+  requests:
+    cpu: 100m
+    memory: 128Mi
+
+autoscaler:
+  enabled: true
+  coresPerReplica: 256
+  nodesPerReplica: 16
+  min: 3
+  max: 10
+  preventSinglePointFailure: true
+
+podDisruptionBudget:
+  minAvailable: 2
+
+affinity:
+  podAntiAffinity:
+    preferredDuringSchedulingIgnoredDuringExecution:
+      - weight: 100
+        podAffinityTerm:
+          topologyKey: kubernetes.io/hostname
+          labelSelector:
+            matchLabels:
+              k8s-app: kube-dns
+
+prometheus:
+  service:
+    enabled: true
+  monitor:
+    enabled: true
+    additionalLabels:
+      prometheus: kube-prometheus
+```
+
+### Example 2: Custom DNS Zones
+
+Add custom DNS entries for internal services:
+
+```yaml
+zoneFiles:
+  - filename: example.db
+    domain: example.com
+    contents: |
+      example.com.   IN SOA sns.dns.icann.com. noc.dns.icann.com. 2015082541 7200 3600 1209600 3600
+      example.com.   IN NS  ns1.example.com.
+      example.com.   IN A   192.168.1.100
+      www.example.com. IN A 192.168.1.100
+      api.example.com. IN A 192.168.1.101
+
+servers:
+  - zones:
+      - zone: example.com
+    port: 53
+    plugins:
+      - name: file
+        parameters: /etc/coredns/example.db example.com
+  - zones:
+      - zone: .
+    port: 53
+    plugins:
+      - name: kubernetes
+        parameters: cluster.local in-addr.arpa ip6.arpa
+      - name: forward
+        parameters: . /etc/resolv.conf
+      - name: cache
+        parameters: 30
+```
+
+### Example 3: DaemonSet Deployment
+
+Run CoreDNS on every node:
+
+```yaml
+deployment:
+  enabled: false
+
+daemonset:
+  enabled: true
+
+tolerations:
+  - operator: Exists
+
+resources:
+  limits:
+    cpu: 100m
+    memory: 128Mi
+  requests:
+    cpu: 50m
+    memory: 64Mi
+```
+
+## Monitoring and Observability
+
+### Prometheus Integration
+
+Enable Prometheus metrics:
+
+```yaml
+prometheus:
+  service:
+    enabled: true
+    annotations:
+      prometheus.io/scrape: "true"
+      prometheus.io/port: "9153"
+  monitor:
+    enabled: true
+    namespace: monitoring
+    additionalLabels:
+      release: prometheus
+    interval: 30s
+```
+
+CoreDNS exposes metrics on port 9153:
+- `coredns_dns_requests_total` - Total DNS requests
+- `coredns_dns_responses_total` - Total DNS responses
+- `coredns_cache_hits_total` - Cache hit count
+- `coredns_cache_misses_total` - Cache miss count
+
+### Health Checks
+
+Configure liveness and readiness probes:
+
+```yaml
+livenessProbe:
+  enabled: true
+  initialDelaySeconds: 60
+  periodSeconds: 10
+  timeoutSeconds: 5
+  failureThreshold: 5
+
+readinessProbe:
+  enabled: true
+  initialDelaySeconds: 30
+  periodSeconds: 5
+  timeoutSeconds: 5
+  failureThreshold: 1
+```
+
+## Troubleshooting
+
+### DNS Resolution Failures
+
+1. Check CoreDNS pod status:
+```bash
+kubectl get pods -n kube-system -l k8s-app=kube-dns
+```
+
+2. View CoreDNS logs:
+```bash
+kubectl logs -n kube-system -l k8s-app=kube-dns --tail=100
+```
+
+3. Test DNS resolution from a pod:
+```bash
+kubectl run -it --rm debug --image=busybox --restart=Never -- nslookup kubernetes.default
+```
+
+### High CPU Usage
+
+- Enable query logging temporarily:
+```yaml
+servers:
+  - plugins:
+      - name: log
+```
+
+- Adjust cache settings:
+```yaml
+servers:
+  - plugins:
+      - name: cache
+        parameters: 60  # Increase cache TTL
+        configBlock: |
+          success 9984 30
+          denial 9984 5
+```
+
+### Memory Leaks
+
+1. Check for too many cached entries
+2. Restart CoreDNS pods:
+```bash
+kubectl rollout restart deployment/coredns -n kube-system
+```
+
+3. Monitor memory usage:
+```bash
+kubectl top pods -n kube-system -l k8s-app=kube-dns
+```
+
+### Configuration Errors
+
+Validate the Corefile:
+```bash
+kubectl get configmap coredns -n kube-system -o yaml
+```
+
+Test configuration changes:
+```bash
+# Edit configmap
+kubectl edit configmap coredns -n kube-system
+
+# Force reload
+kubectl rollout restart deployment/coredns -n kube-system
+```
+
+## Advanced Configuration
+
+### External DNS Integration
+
+Forward specific zones to external DNS:
+
+```yaml
+servers:
+  - zones:
+      - zone: external.com
+    plugins:
+      - name: forward
+        parameters: . 8.8.8.8 8.8.4.4
+  - zones:
+      - zone: .
+    plugins:
+      - name: kubernetes
+        parameters: cluster.local
+      - name: forward
+        parameters: . /etc/resolv.conf
+```
+
+### Cilium Local Redirect Policy
+
+Optimize DNS with Cilium:
+
+```yaml
+cilium:
+  localRedirectPolicy:
+    enabled: true
+    frontend:
+      ip: "169.254.169.254"
+      toPorts:
+        - port: "53"
+          protocol: "UDP"
+        - port: "53"
+          protocol: "TCP"
+```
+
+<Warning>
+  This feature requires Cilium CNI with localRedirectPolicy enabled.
+</Warning>
+
+## Security Considerations
+
+### Pod Security Context
+
+```yaml
+securityContext:
+  allowPrivilegeEscalation: false
+  capabilities:
+    add:
+      - NET_BIND_SERVICE
+    drop:
+      - ALL
+  readOnlyRootFilesystem: true
+
+podSecurityContext:
+  runAsNonRoot: true
+  runAsUser: 1000
+  fsGroup: 1000
+```
+
+### Network Policies
+
+Restrict access to CoreDNS:
+
+```yaml
+apiVersion: networking.k8s.io/v1
+kind: NetworkPolicy
+metadata:
+  name: coredns-network-policy
+  namespace: kube-system
+spec:
+  podSelector:
+    matchLabels:
+      k8s-app: kube-dns
+  policyTypes:
+    - Ingress
+  ingress:
+    - from:
+        - namespaceSelector: {}
+      ports:
+        - protocol: UDP
+          port: 53
+        - protocol: TCP
+          port: 53
+```
+
+## Uninstallation
+
+<Warning>
+  Removing CoreDNS will break DNS resolution for all pods. Ensure you have an alternative DNS solution before uninstalling.
+</Warning>
+
+```bash
+helm uninstall coredns --namespace kube-system
+```
+
+## Additional Resources
+
+- [CoreDNS Official Documentation](https://coredns.io/manual/toc/)
+- [CoreDNS Plugins](https://coredns.io/plugins/)
+- [Kubernetes DNS Specification](https://kubernetes.io/docs/concepts/services-networking/dns-pod-service/)
+- [Chart Source](https://github.com/coredns/helm)

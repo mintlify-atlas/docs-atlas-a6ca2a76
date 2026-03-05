@@ -1,0 +1,145 @@
+---
+title: Prometheus Beanstalkd Exporter
+description: Export Beanstalkd queue metrics to Prometheus
+---
+
+The Prometheus Beanstalkd Exporter chart deploys a Prometheus exporter for [Beanstalkd](https://beanstalkd.github.io/) work queues, exposing metrics about queue tubes, jobs, and server statistics.
+
+## What It Monitors
+
+This exporter collects metrics from Beanstalkd servers including:
+
+- Tube statistics (ready, buried, delayed, urgent jobs)
+- Job counts and states
+- Server connections and commands
+- Queue depth and processing metrics
+
+## Installation
+
+### Basic Installation
+
+```bash
+helm repo add douban https://douban.github.io/charts
+helm install beanstalkd-exporter douban/prometheus-beanstalkd-exporter \
+  --set beanstalkd.address="mybeanstalkd:11300"
+```
+
+### Configuration
+
+<ParamField path="beanstalkd.address" type="string" default="mybtd:8881" required>
+  The address of the Beanstalkd server to monitor (host:port format)
+</ParamField>
+
+<ParamField path="image.repository" type="string" default="ghcr.io/leoquote/beanstalkd_exporter">
+  Container image repository
+</ParamField>
+
+<ParamField path="image.tag" type="string" default="master">
+  Container image tag
+</ParamField>
+
+<ParamField path="service.port" type="number" default="8080">
+  Port to expose metrics on
+</ParamField>
+
+## ServiceMonitor Configuration
+
+To enable automatic Prometheus scraping via the Prometheus Operator:
+
+```yaml
+serviceMonitor:
+  enabled: true
+  interval: 30s
+  labels:
+    prometheus: kube-prometheus
+```
+
+<ParamField path="serviceMonitor.enabled" type="boolean" default="false">
+  Enable ServiceMonitor resource creation
+</ParamField>
+
+<ParamField path="serviceMonitor.interval" type="string" default="30s">
+  How frequently Prometheus should scrape
+</ParamField>
+
+<ParamField path="serviceMonitor.timeout" type="string" default="10s">
+  Scrape timeout duration
+</ParamField>
+
+## Manual Prometheus Configuration
+
+If not using the Prometheus Operator, add this scrape config:
+
+```yaml
+scrape_configs:
+  - job_name: 'beanstalkd-exporter'
+    static_configs:
+      - targets: ['beanstalkd-exporter:8080']
+    scrape_interval: 30s
+    scrape_timeout: 10s
+```
+
+## Prometheus Rules
+
+You can define custom alerting rules:
+
+```yaml
+prometheusRule:
+  enabled: true
+  rules:
+    - alert: BeanstalkdTubeBacklog
+      expr: beanstalkd_current_jobs_ready > 1000
+      for: 5m
+      labels:
+        severity: warning
+      annotations:
+        summary: Beanstalkd tube has high backlog
+        description: "Tube {{ $labels.tube }} has {{ $value }} ready jobs"
+```
+
+## Example Values
+
+```yaml
+replicaCount: 1
+
+beanstalkd:
+  address: "beanstalkd.default.svc.cluster.local:11300"
+
+image:
+  tag: "master"
+  pullPolicy: IfNotPresent
+
+service:
+  type: ClusterIP
+  port: 8080
+
+serviceMonitor:
+  enabled: true
+  interval: 30s
+  labels:
+    release: prometheus
+
+resources:
+  limits:
+    cpu: 100m
+    memory: 64Mi
+  requests:
+    cpu: 50m
+    memory: 32Mi
+```
+
+## Metrics Exposed
+
+The exporter provides metrics at the `/metrics` endpoint including:
+
+- `beanstalkd_current_jobs_ready` - Jobs ready to be processed
+- `beanstalkd_current_jobs_reserved` - Jobs currently being processed
+- `beanstalkd_current_jobs_delayed` - Jobs waiting to become ready
+- `beanstalkd_current_jobs_buried` - Failed jobs that need manual intervention
+- `beanstalkd_cmd_put_total` - Total put commands
+- `beanstalkd_current_connections` - Current client connections
+
+## Resources
+
+- [Beanstalkd Exporter GitHub](https://github.com/messagebird/beanstalkd_exporter)
+- [Beanstalkd Documentation](https://beanstalkd.github.io/)

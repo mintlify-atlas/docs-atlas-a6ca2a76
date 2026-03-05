@@ -1,0 +1,488 @@
+---
+title: Chart Reference Overview
+description: Overview of chart structure, template patterns, and best practices
+---
+
+This reference provides an overview of the standard chart structure and common patterns used across all charts in this repository.
+
+## Chart Structure
+
+All Helm charts in this repository follow a standard structure:
+
+```
+my-chart/
+├── Chart.yaml              # Chart metadata and version information
+├── values.yaml             # Default configuration values
+├── README.md               # Chart documentation
+├── .helmignore             # Files to exclude from the package
+├── templates/              # Kubernetes manifest templates
+│   ├── NOTES.txt          # Post-installation notes shown to users
+│   ├── _helpers.tpl       # Template helper functions
+│   ├── deployment.yaml    # Main Deployment resource
+│   ├── service.yaml       # Service to expose the application
+│   ├── serviceaccount.yaml # ServiceAccount for pods
+│   ├── ingress.yaml       # Optional Ingress resource
+│   ├── httproute.yaml     # Optional Gateway API HTTPRoute
+│   ├── hpa.yaml           # Optional HorizontalPodAutoscaler
+│   ├── servicemonitor.yaml # Optional Prometheus ServiceMonitor
+│   ├── prometheusrule.yaml # Optional PrometheusRule for alerting
+│   └── tests/             # Helm test files
+│       └── test-connection.yaml
+└── charts/                 # Dependency charts (if any)
+```
+
+## Chart.yaml Metadata
+
+The `Chart.yaml` file defines the chart's metadata:
+
+```yaml
+apiVersion: v2
+name: nginx
+home: https://nginx.org/
+description: A Helm chart for Kubernetes
+maintainers:
+  - name: douban
+type: application
+version: 0.4.1        # Chart version (must increment with changes)
+appVersion: "1.16.0"  # Application version being deployed
+```
+
+### Key Fields
+
+- **apiVersion**: Always `v2` for Helm 3 charts
+- **name**: Chart name (must match the directory name)
+- **version**: Chart version following [Semantic Versioning](https://semver.org/)
+- **appVersion**: Version of the packaged application
+- **type**: `application` (deployable) or `library` (shared templates)
+- **home**: Link to the project homepage
+- **description**: Brief description of what the chart deploys
+
+## Template Patterns
+
+### Standard Resource Naming
+
+All resources use the `fullname` helper for consistent naming:
+
+```yaml
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: {{ include "nginx.fullname" . }}
+  labels:
+    {{- include "nginx.labels" . | nindent 4 }}
+```
+
+### Labels
+
+Standard labels are applied to all resources:
+
+```yaml
+metadata:
+  labels:
+    helm.sh/chart: nginx-0.4.1
+    app.kubernetes.io/name: nginx
+    app.kubernetes.io/instance: my-release
+    app.kubernetes.io/version: "1.16.0"
+    app.kubernetes.io/managed-by: Helm
+```
+
+### Conditional Resource Creation
+
+Optional resources use conditionals:
+
+```yaml
+{{- if .Values.ingress.enabled }}
+apiVersion: networking.k8s.io/v1
+kind: Ingress
+metadata:
+  name: {{ include "nginx.fullname" . }}
+# ...
+{{- end }}
+```
+
+### Image Configuration
+
+Images are configured with fallback to `appVersion`:
+
+```yaml
+image: "{{ .Values.image.repository }}:{{ .Values.image.tag | default .Chart.AppVersion }}"
+imagePullPolicy: {{ .Values.image.pullPolicy }}
+```
+
+### Resource Requests and Limits
+
+Resources are configurable but empty by default:
+
+```yaml
+resources:
+  {{- toYaml .Values.resources | nindent 12 }}
+```
+
+```yaml
+# values.yaml
+resources: {}
+  # limits:
+  #   cpu: 100m
+  #   memory: 128Mi
+  # requests:
+  #   cpu: 100m
+  #   memory: 128Mi
+```
+
+## Helper Functions (_helpers.tpl)
+
+The `_helpers.tpl` file contains reusable template functions that ensure consistency across templates.
+
+### Standard Helpers
+
+Every chart includes these helper functions:
+
+#### Chart Name
+
+```yaml
+{{/*
+Expand the name of the chart.
+*/}}
+{{- define "nginx.name" -}}
+{{- default .Chart.Name .Values.nameOverride | trunc 63 | trimSuffix "-" }}
+{{- end }}
+```
+
+Returns the chart name, allowing override via `nameOverride`.
+
+#### Full Name
+
+```yaml
+{{/*
+Create a default fully qualified app name.
+We truncate at 63 chars because some Kubernetes name fields are limited to this.
+*/}}
+{{- define "nginx.fullname" -}}
+{{- if .Values.fullnameOverride }}
+{{- .Values.fullnameOverride | trunc 63 | trimSuffix "-" }}
+{{- else }}
+{{- $name := default .Chart.Name .Values.nameOverride }}
+{{- if contains $name .Release.Name }}
+{{- .Release.Name | trunc 63 | trimSuffix "-" }}
+{{- else }}
+{{- printf "%s-%s" .Release.Name $name | trunc 63 | trimSuffix "-" }}
+{{- end }}
+{{- end }}
+{{- end }}
+```
+
+Generates a fully qualified name combining release name and chart name.
+
+#### Chart Label
+
+```yaml
+{{/*
+Create chart name and version as used by the chart label.
+*/}}
+{{- define "nginx.chart" -}}
+{{- printf "%s-%s" .Chart.Name .Chart.Version | replace "+" "_" | trunc 63 | trimSuffix "-" }}
+{{- end }}
+```
+
+Creates the `helm.sh/chart` label value.
+
+#### Common Labels
+
+```yaml
+{{/*
+Common labels
+*/}}
+{{- define "nginx.labels" -}}
+helm.sh/chart: {{ include "nginx.chart" . }}
+{{ include "nginx.selectorLabels" . }}
+{{- if .Chart.AppVersion }}
+app.kubernetes.io/version: {{ .Chart.AppVersion | quote }}
+{{- end }}
+app.kubernetes.io/managed-by: {{ .Release.Service }}
+{{- end }}
+```
+
+Applies standard labels to all resources.
+
+#### Selector Labels
+
+```yaml
+{{/*
+Selector labels
+*/}}
+{{- define "nginx.selectorLabels" -}}
+app.kubernetes.io/name: {{ include "nginx.name" . }}
+app.kubernetes.io/instance: {{ .Release.Name }}
+{{- end }}
+```
+
+Provides labels used for pod selectors.
+
+#### ServiceAccount Name
+
+```yaml
+{{/*
+Create the name of the service account to use
+*/}}
+{{- define "nginx.serviceAccountName" -}}
+{{- if .Values.serviceAccount.create }}
+{{- default (include "nginx.fullname" .) .Values.serviceAccount.name }}
+{{- else }}
+{{- default "default" .Values.serviceAccount.name }}
+{{- end }}
+{{- end }}
+```
+
+Determines the ServiceAccount name to use.
+
+### Using Helpers
+
+Helpers are invoked with the `include` function:
+
+```yaml
+metadata:
+  name: {{ include "nginx.fullname" . }}
+  labels:
+    {{- include "nginx.labels" . | nindent 4 }}
+```
+
+The `nindent` function indents the output by the specified number of spaces.
+
+## Best Practices
+
+### 1. Make Everything Configurable
+
+Expose configuration through `values.yaml`:
+
+```yaml
+# values.yaml
+replicaCount: 1
+containerPort: 80
+
+# deployment.yaml
+replicas: {{ .Values.replicaCount }}
+containerPort: {{ .Values.containerPort }}
+```
+
+### 2. Provide Sensible Defaults
+
+Defaults should work for most use cases:
+
+```yaml
+image:
+  repository: nginx
+  pullPolicy: IfNotPresent
+  tag: ""  # Defaults to appVersion
+
+service:
+  type: ClusterIP
+  port: 80
+```
+
+### 3. Use Resource Limits Conservatively
+
+Leave resources undefined by default to support resource-constrained environments:
+
+```yaml
+resources: {}
+  # Let users set their own limits:
+  # limits:
+  #   cpu: 100m
+  #   memory: 128Mi
+```
+
+### 4. Support Custom Environment Variables
+
+Allow users to inject custom environment variables:
+
+```yaml
+# values.yaml
+env: []
+
+# deployment.yaml
+{{- with .Values.env }}
+env:
+  {{- toYaml . | nindent 12 }}
+{{- end}}
+```
+
+Usage:
+
+```yaml
+env:
+  - name: MY_VAR
+    value: "my-value"
+  - name: SECRET_KEY
+    valueFrom:
+      secretKeyRef:
+        name: my-secret
+        key: key
+```
+
+### 5. Support Volumes and VolumeMounts
+
+Allow users to add custom volumes:
+
+```yaml
+# values.yaml
+volumes: []
+volumeMounts: []
+
+# deployment.yaml
+{{- with .Values.volumeMounts }}
+volumeMounts:
+  {{- toYaml . | nindent 12 }}
+{{- end }}
+
+{{- with .Values.volumes}}
+volumes:
+  {{- toYaml . | nindent 8 }}
+{{- end }}
+```
+
+### 6. Include Monitoring Resources
+
+Support Prometheus monitoring:
+
+```yaml
+serviceMonitor:
+  enabled: false
+
+prometheusRule:
+  enabled: false
+```
+
+### 7. Support Multiple Ingress Controllers
+
+Provide both traditional Ingress and Gateway API HTTPRoute:
+
+```yaml
+ingress:
+  enabled: false
+  className: ""
+
+httpRoute:
+  enabled: false
+  gatewayRef:
+    name: envoy-gateway-bundle
+    namespace: envoy-gateway-system
+```
+
+### 8. Follow Naming Conventions
+
+All helper functions should be namespaced with the chart name:
+
+```yaml
+{{- define "nginx.name" -}}      # Good
+{{- define "name" -}}            # Bad - could conflict
+```
+
+### 9. Document Everything
+
+Add comments to values.yaml explaining each parameter:
+
+```yaml
+image:
+  # Container image repository
+  repository: nginx
+  # Image pull policy
+  pullPolicy: IfNotPresent
+  # Overrides the image tag whose default is the chart appVersion.
+  tag: ""
+```
+
+### 10. Truncate Resource Names
+
+Kubernetes has a 63-character limit for many resource names:
+
+```yaml
+{{- define "nginx.fullname" -}}
+{{- .Values.fullnameOverride | trunc 63 | trimSuffix "-" }}
+{{- end }}
+```
+
+## Common Deployment Pattern
+
+Here's a typical deployment template structure:
+
+```yaml
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: {{ include "nginx.fullname" . }}
+  labels:
+    {{- include "nginx.labels" . | nindent 4 }}
+spec:
+  {{- if not .Values.autoscaling.enabled }}
+  replicas: {{ .Values.replicaCount }}
+  {{- end }}
+  selector:
+    matchLabels:
+      {{- include "nginx.selectorLabels" . | nindent 6 }}
+  template:
+    metadata:
+      {{- with .Values.podAnnotations }}
+      annotations:
+        {{- toYaml . | nindent 8 }}
+      {{- end }}
+      labels:
+        {{- include "nginx.selectorLabels" . | nindent 8 }}
+    spec:
+      {{- with .Values.imagePullSecrets }}
+      imagePullSecrets:
+        {{- toYaml . | nindent 8 }}
+      {{- end }}
+      serviceAccountName: {{ include "nginx.serviceAccountName" . }}
+      securityContext:
+        {{- toYaml .Values.podSecurityContext | nindent 8 }}
+      containers:
+        - name: {{ .Chart.Name }}
+          securityContext:
+            {{- toYaml .Values.securityContext | nindent 12 }}
+          image: "{{ .Values.image.repository }}:{{ .Values.image.tag | default .Chart.AppVersion }}"
+          imagePullPolicy: {{ .Values.image.pullPolicy }}
+          {{- with .Values.env }}
+          env:
+            {{- toYaml . | nindent 12 }}
+          {{- end}}
+          ports:
+            - name: http
+              containerPort: {{ .Values.containerPort }}
+              protocol: TCP
+          livenessProbe:
+            httpGet:
+              path: /
+              port: http
+          readinessProbe:
+            httpGet:
+              path: /
+              port: http
+          resources:
+            {{- toYaml .Values.resources | nindent 12 }}
+          {{- with .Values.volumeMounts }}
+          volumeMounts:
+            {{- toYaml . | nindent 12 }}
+          {{- end }}
+      {{- with .Values.volumes}}
+      volumes:
+        {{- toYaml . | nindent 8 }}
+      {{- end }}
+      {{- with .Values.nodeSelector }}
+      nodeSelector:
+        {{- toYaml . | nindent 8 }}
+      {{- end }}
+      {{- with .Values.affinity }}
+      affinity:
+        {{- toYaml . | nindent 8 }}
+      {{- end }}
+      {{- with .Values.tolerations }}
+      tolerations:
+        {{- toYaml . | nindent 8 }}
+      {{- end }}
+```
+
+## Next Steps
+
+- Review [Common Parameters](/reference/common-parameters) for standard configuration options
+- See [Chart Development](/contributing/chart-development) for creating new charts
+- Check [Contributing Guidelines](/contributing/guidelines) for submission requirements
