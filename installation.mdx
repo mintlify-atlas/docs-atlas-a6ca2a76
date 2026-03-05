@@ -44,7 +44,7 @@ helm version
 
 Expected output:
 
-```
+```text
 version.BuildInfo{Version:"v3.14.0", GitCommit:"...", GitTreeState:"clean", GoVersion:"go1.21.5"}
 ```
 
@@ -124,7 +124,7 @@ helm repo add douban https://douban.github.io/charts/
 
 Successful output:
 
-```
+```text
 "douban" has been added to your repositories
 ```
 
@@ -138,7 +138,7 @@ helm repo update
 
 Output:
 
-```
+```text
 Hang tight while we grab the latest from your chart repositories...
 ...Successfully got an update from the "douban" chart repository
 Update Complete. Happy Helming!
@@ -158,7 +158,7 @@ helm repo list
 
 Expected output:
 
-```
+```text
 NAME      URL
 douban    https://douban.github.io/charts/
 ```
@@ -173,7 +173,7 @@ helm search repo douban
 
 Output:
 
-```
+```text
 NAME                                    CHART VERSION   APP VERSION     DESCRIPTION
 douban/aliyun-exporter                  0.1.0          1.0.0           Aliyun CloudMonitor exporter for Prometheus
 douban/helpdesk                         0.3.3          0.2.0           A Helm chart for Douban Helpdesk
@@ -507,7 +507,7 @@ helm history my-nginx
 
 Output:
 
-```
+```text
 REVISION  UPDATED                   STATUS      CHART         APP VERSION  DESCRIPTION
 1         Thu Mar 5 10:00:00 2026   superseded  nginx-0.4.0  1.16.0       Install complete
 2         Thu Mar 5 11:00:00 2026   deployed    nginx-0.4.1  1.16.0       Upgrade complete
