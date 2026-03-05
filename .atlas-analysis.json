@@ -1,0 +1,137 @@
+{
+  "projectType": "infrastructure",
+  "projectName": "Douban Helm Charts",
+  "projectDescription": "A collection of production-ready Helm charts for deploying applications and services on Kubernetes",
+  "theme": "aspen",
+  "primaryColor": "#326CE5",
+  "lightColor": "#4A90E2",
+  "darkColor": "#1E4D8B",
+  "navigation": {
+    "tabs": [
+      {
+        "tab": "Documentation",
+        "groups": [
+          {
+            "group": "Get Started",
+            "pages": [
+              "introduction",
+              "quickstart",
+              "installation"
+            ]
+          },
+          {
+            "group": "Web Services",
+            "pages": [
+              "charts/nginx",
+              "charts/helpdesk",
+              "charts/dify",
+              "charts/overlord"
+            ]
+          },
+          {
+            "group": "Monitoring & Exporters",
+            "pages": [
+              "charts/prometheus-beanstalkd-exporter",
+              "charts/prometheus-memcached-exporter",
+              "charts/aliyun-exporter",
+              "charts/tencentcloud-exporter",
+              "charts/tencentcloud-info-exporter",
+              "charts/qiniu-exporter",
+              "charts/ucloud-exporter",
+              "charts/upyun-exporter",
+              "charts/tinyproxy-exporter"
+            ]
+          },
+          {
+            "group": "Infrastructure",
+            "pages": [
+              "charts/coredns",
+              "charts/gatekeeper",
+              "charts/cbs-csi-driver",
+              "charts/clb-controller-manager",
+              "charts/gateway-role",
+              "charts/k8s-cron"
+            ]
+          },
+          {
+            "group": "Applications",
+            "pages": [
+              "charts/archery",
+              "charts/channels",
+              "charts/codecov",
+              "charts/goinception",
+              "charts/healthchecks",
+              "charts/kafka-ui",
+              "charts/karma",
+              "charts/mergeable",
+              "charts/nonebot",
+              "charts/pint",
+              "charts/probot",
+              "charts/redirect",
+              "charts/selenium"
+            ]
+          },
+          {
+            "group": "Configuration",
+            "pages": [
+              "configuration/values",
+              "configuration/customization",
+              "configuration/ingress",
+              "configuration/monitoring"
+            ]
+          },
+          {
+            "group": "Contributing",
+            "pages": [
+              "contributing/guidelines",
+              "contributing/chart-development"
+            ]
+          }
+        ]
+      },
+      {
+        "tab": "Chart Reference",
+        "groups": [
+          {
+            "group": "Overview",
+            "pages": [
+              "reference/overview",
+              "reference/common-parameters"
+            ]
+          }
+        ]
+      }
+    ]
+  },
+  "keyFeatures": [
+    "32+ production-ready Helm charts",
+    "Cloud provider exporters for Prometheus",
+    "Kubernetes infrastructure components",
+    "Application deployment templates",
+    "Standardized configuration patterns",
+    "Support for Ingress and HTTPRoute",
+    "Built-in monitoring with ServiceMonitor",
+    "Automated chart testing and releasing"
+  ],
+  "publicApiSurface": [
+    "nginx - General web service deployment",
+    "helpdesk - Self-service helpdesk platform",
+    "dify - AI application deployment",
+    "overlord - Memcached and Redis proxy cluster",
+    "archery - SQL audit platform",
+    "aliyun-exporter - Aliyun cloud metrics exporter",
+    "tencentcloud-exporter - Tencent Cloud metrics exporter",
+    "qiniu-exporter - Qiniu cloud metrics exporter",
+    "ucloud-exporter - UCloud metrics exporter",
+    "upyun-exporter - Upyun CDN metrics exporter",
+    "prometheus-beanstalkd-exporter - Beanstalkd metrics exporter",
+    "prometheus-memcached-exporter - Memcached metrics exporter",
+    "coredns - DNS service for Kubernetes",
+    "gatekeeper - Policy controller for Kubernetes",
+    "cbs-csi-driver - Tencent Cloud CBS CSI driver",
+    "clb-controller-manager - Cloud load balancer controller",
+    "k8s-cron - Kubernetes CronJob management",
+    "kafka-ui - Kafka cluster management UI",
+    "selenium - Browser automation grid"
+  ]
+}
